@@ -3,10 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 import { Button } from "@/components/Button";
 import { Button as UIButton } from "@/components/ui/button";
-import { signIn, signInWithOauth2 } from "@/utils/auth-client";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { signIn, signInWithOauth2, signUp } from "@/utils/auth-client";
 import { WELCOME_PATH } from "@/utils/config";
 import { toastError } from "@/components/Toast";
 import { normalizeInternalPath } from "@/utils/path";
@@ -32,10 +34,15 @@ export function LoginForm({
   const showGoogleLogin = enabledProviders.includes("google");
   const showMicrosoftLogin = enabledProviders.includes("microsoft");
   const showSsoLogin = enabledProviders.includes("sso");
+  const showCredentialsLogin = enabledProviders.includes("credentials");
 
   const [loadingApple, setLoadingApple] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [loadingMicrosoft, setLoadingMicrosoft] = useState(false);
+  const [loadingCredentials, setLoadingCredentials] = useState(false);
+  const [credentialsMode, setCredentialsMode] = useState<"sign-in" | "sign-up">(
+    "sign-in",
+  );
 
   const handleGoogleSignIn = async () => {
     setLoadingGoogle(true);
@@ -79,8 +86,120 @@ export function LoginForm({
     });
   };
 
+  const handleCredentialsSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "");
+    const password = String(formData.get("password") ?? "");
+    const name = String(formData.get("name") ?? "");
+
+    setLoadingCredentials(true);
+    try {
+      if (credentialsMode === "sign-up") {
+        const result = await signUp.email({
+          name,
+          email,
+          password,
+          callbackURL,
+        });
+        if (result.error) throw new Error(result.error.message);
+      } else {
+        const result = await signIn.email({
+          email,
+          password,
+          callbackURL,
+        });
+        if (result.error) throw new Error(result.error.message);
+        if (result.data?.url) {
+          redirectToSafeUrl(result.data.url);
+          return;
+        }
+      }
+
+      redirectToSafeUrl(callbackURL);
+    } catch (error) {
+      const description = getCredentialsSignInErrorMessage(error);
+      logger.error("Error signing in with email", { error });
+      toastError({
+        title:
+          credentialsMode === "sign-up"
+            ? "Error creating account"
+            : "Error signing in with email",
+        description,
+      });
+    } finally {
+      setLoadingCredentials(false);
+    }
+  };
+
   return (
     <div className="flex flex-col justify-center gap-2 px-4 sm:px-16">
+      {showCredentialsLogin ? (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={handleCredentialsSubmit}
+        >
+          {credentialsMode === "sign-up" ? (
+            <div className="grid gap-2">
+              <Label htmlFor="credentials-name">Name</Label>
+              <Input
+                id="credentials-name"
+                name="name"
+                autoComplete="name"
+                required
+              />
+            </div>
+          ) : null}
+
+          <div className="grid gap-2">
+            <Label htmlFor="credentials-email">Email</Label>
+            <Input
+              id="credentials-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="credentials-password">Password</Label>
+            <Input
+              id="credentials-password"
+              name="password"
+              type="password"
+              autoComplete={
+                credentialsMode === "sign-up"
+                  ? "new-password"
+                  : "current-password"
+              }
+              minLength={8}
+              required
+            />
+          </div>
+
+          <UIButton type="submit" size="lg" loading={loadingCredentials}>
+            {credentialsMode === "sign-up"
+              ? "Sign up with email"
+              : "Sign in with email"}
+          </UIButton>
+          <UIButton
+            type="button"
+            variant="link"
+            size="sm"
+            onClick={() =>
+              setCredentialsMode(
+                credentialsMode === "sign-up" ? "sign-in" : "sign-up",
+              )
+            }
+          >
+            {credentialsMode === "sign-up"
+              ? "Already have an account? Sign in"
+              : "Create an account"}
+          </UIButton>
+        </form>
+      ) : null}
+
       {showGoogleLogin ? (
         <Button size="2xl" loading={loadingGoogle} onClick={handleGoogleSignIn}>
           <span className="flex items-center justify-center">
@@ -206,4 +325,16 @@ function getSocialSignInErrorMessage(error: unknown) {
   }
 
   return "Please try again or contact support.";
+}
+
+function getCredentialsSignInErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message === "signup_not_allowed") {
+    return "This email is not allowed to sign up.";
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return "Please check your email and password, then try again.";
 }
