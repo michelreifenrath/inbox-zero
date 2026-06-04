@@ -177,6 +177,117 @@ describe("ImapProvider", () => {
     expect(secondPage.nextPageToken).toBeUndefined();
   });
 
+  it("skips non-selectable folders during all-folder pagination", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        {
+          path: "[Gmail]",
+          name: "[Gmail]",
+          delimiter: "/",
+          flags: new Set(["\\Noselect"]),
+        },
+        {
+          path: "Archive",
+          name: "Archive",
+          delimiter: "/",
+          flags: new Set(["\\NonExistent"]),
+        },
+        { path: "Selectable", name: "Selectable", delimiter: "/" },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "inbox@example.com",
+            "Inbox",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+        "[Gmail]": [
+          buildStoredMessage(
+            2,
+            "noselect@example.com",
+            "Noselect",
+            "2030-01-01T12:00:00.000Z",
+          ),
+        ],
+        Archive: [
+          buildStoredMessage(
+            3,
+            "nonexistent@example.com",
+            "NonExistent",
+            "2030-01-01T11:00:00.000Z",
+          ),
+        ],
+        Selectable: [
+          buildStoredMessage(
+            4,
+            "selectable@example.com",
+            "Selectable",
+            "2030-01-01T10:00:00.000Z",
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    const page = await provider.getMessagesWithPagination({
+      maxResults: 10,
+      inboxOnly: false,
+    });
+
+    expect(page.messages.map((message) => message.id)).toEqual([
+      "Selectable:4",
+      "INBOX:1",
+    ]);
+    expect(client.openedMailboxes).not.toContain("[Gmail]");
+    expect(client.openedMailboxes).not.toContain("Archive");
+  });
+
+  it("skips non-selectable folders during Message-ID lookup", async () => {
+    const client = new MockImapClient({
+      folders: [
+        {
+          path: "[Gmail]",
+          name: "[Gmail]",
+          delimiter: "/",
+          flags: new Set(["\\Noselect"]),
+        },
+        { path: "Archive", name: "Archive", delimiter: "/" },
+      ],
+      messages: {
+        "[Gmail]": [
+          buildStoredMessage(
+            1,
+            "target@example.com",
+            "Skipped",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+        Archive: [
+          buildStoredMessage(
+            2,
+            "target@example.com",
+            "Target",
+            "2030-01-01T10:00:00.000Z",
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    const message =
+      await provider.getMessageByRfc822MessageId("target@example.com");
+
+    expect(message?.id).toBe("Archive:2");
+    expect(client.openedMailboxes).not.toContain("[Gmail]");
+  });
+
   it("uses the IMAP sent special-use folder for sent message listing", async () => {
     const client = new MockImapClient({
       folders: [
@@ -255,6 +366,12 @@ describe("ImapProvider", () => {
       folders: [
         { path: "INBOX", name: "INBOX", delimiter: "/" },
         { path: "Sent", name: "Sent", delimiter: "/", specialUse: "\\Sent" },
+        {
+          path: "Labels",
+          name: "Labels",
+          delimiter: "/",
+          flags: new Set(["\\Noselect"]),
+        },
       ],
       messages: {
         INBOX: [
@@ -277,6 +394,18 @@ describe("ImapProvider", () => {
             },
           ),
         ],
+        Labels: [
+          buildStoredMessage(
+            3,
+            "label@example.com",
+            "Skipped",
+            "2030-01-01T11:00:00.000Z",
+            {
+              references: "<root@example.com>",
+              inReplyTo: "<root@example.com>",
+            },
+          ),
+        ],
       },
     });
     const provider = new ImapProvider(settings, undefined, {
@@ -292,6 +421,7 @@ describe("ImapProvider", () => {
       "Sent:2",
     ]);
     expect(inboxMessages.map((message) => message.id)).toEqual(["INBOX:1"]);
+    expect(client.openedMailboxes).not.toContain("Labels");
   });
 
   it("throws clear errors for unsupported read-only operations", async () => {
@@ -315,6 +445,7 @@ class MockImapClient implements ImapProviderClient {
   connect = vi.fn(async () => undefined);
   close = vi.fn();
   logout = vi.fn(async () => undefined);
+  openedMailboxes: string[] = [];
   private currentMailbox = "INBOX";
   private readonly folders: Array<{
     path: string;
@@ -322,6 +453,7 @@ class MockImapClient implements ImapProviderClient {
     delimiter?: string;
     parentPath?: string;
     specialUse?: string;
+    flags?: Set<string>;
     status?: { messages?: number; unseen?: number };
   }>;
   private readonly messages: Record<string, StoredMessage[]>;
@@ -353,6 +485,15 @@ class MockImapClient implements ImapProviderClient {
   }
 
   async mailboxOpen(path: string) {
+    const folder = this.folders.find((item) => item.path === path);
+    if (
+      Array.from(folder?.flags || []).some((flag) =>
+        ["\\noselect", "\\nonexistent"].includes(flag.toLowerCase()),
+      )
+    ) {
+      throw new Error(`Cannot open non-selectable mailbox: ${path}`);
+    }
+    this.openedMailboxes.push(path);
     this.currentMailbox = path;
   }
 

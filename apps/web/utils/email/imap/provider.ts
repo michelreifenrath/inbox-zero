@@ -29,6 +29,7 @@ const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_THREAD_SCAN_LIMIT = 100;
 const INBOX = "INBOX";
 const SENT_SPECIAL_USE = "\\Sent";
+const NON_SELECTABLE_FOLDER_FLAGS = new Set(["\\noselect", "\\nonexistent"]);
 
 export type ImapProviderClient = {
   connect(): Promise<void>;
@@ -364,7 +365,7 @@ export class ImapProvider implements EmailProvider {
     if (!normalized) return null;
 
     return this.withClient(async (client) => {
-      const folders = await client.list();
+      const folders = (await client.list()).filter(isSelectableFolder);
       for (const folder of folders) {
         const uids = await this.searchUids(client, folder.path, {
           header: { "message-id": `<${normalized}>` },
@@ -398,7 +399,7 @@ export class ImapProvider implements EmailProvider {
 
   async getThreadMessages(threadId: string): Promise<ParsedMessage[]> {
     return this.withClient(async (client) => {
-      const folders = await client.list();
+      const folders = (await client.list()).filter(isSelectableFolder);
       return this.getThreadMessagesFromMailboxes(
         client,
         threadId,
@@ -804,7 +805,7 @@ export class ImapProvider implements EmailProvider {
     offset: number,
   ): Promise<{ messages: ParsedMessage[]; nextPageToken?: string }> {
     const pageSize = options.maxResults || DEFAULT_PAGE_SIZE;
-    const folders = await client.list();
+    const folders = (await client.list()).filter(isSelectableFolder);
     const messages: ParsedMessage[] = [];
 
     for (const folder of folders) {
@@ -1038,6 +1039,12 @@ export class ImapProvider implements EmailProvider {
 
 function createDefaultClient(options: ImapFlowOptions): ImapProviderClient {
   return new ImapFlow(options);
+}
+
+function isSelectableFolder(folder: ImapMailbox) {
+  return !Array.from(folder.flags || []).some((flag) =>
+    NON_SELECTABLE_FOLDER_FLAGS.has(flag.toLowerCase()),
+  );
 }
 
 function toFolderTree(folders: ImapMailbox[]): OutlookFolder[] {
