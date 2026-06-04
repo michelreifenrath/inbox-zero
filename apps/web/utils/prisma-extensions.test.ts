@@ -16,7 +16,8 @@ vi.mock("@/generated/prisma/client", () => ({
 
 import { __testing__ } from "./prisma-extensions";
 
-const { buildQuery, encryptCreateData, encryptUpdateData } = __testing__;
+const { ENCRYPTED_FIELDS, buildQuery, encryptCreateData, encryptUpdateData } =
+  __testing__;
 
 const FIELDS = ["webhookSecret"] as const;
 
@@ -136,5 +137,25 @@ describe("buildQuery handlers", () => {
     await handlers.user.upsert({ args, query: queryFn });
     expect(args.create.webhookSecret).toMatch(/^v1:[0-9a-f]+$/);
     expect(args.update.webhookSecret.set).toMatch(/^v1:[0-9a-f]+$/);
+  });
+
+  it("encrypts emailConnection.password on create, update, and upsert", async () => {
+    const handlers = buildQuery(ENCRYPTED_FIELDS);
+
+    const createArgs = { data: { password: "created-password" } };
+    await handlers.emailConnection.create({ args: createArgs, query: queryFn });
+    expect(createArgs.data.password).toMatch(/^v1:[0-9a-f]+$/);
+
+    const updateArgs = { data: { password: { set: "updated-password" } } };
+    await handlers.emailConnection.update({ args: updateArgs, query: queryFn });
+    expect(updateArgs.data.password.set).toMatch(/^v1:[0-9a-f]+$/);
+
+    const upsertArgs = {
+      create: { password: "upsert-created-password" },
+      update: { password: { set: "upsert-updated-password" } },
+    };
+    await handlers.emailConnection.upsert({ args: upsertArgs, query: queryFn });
+    expect(upsertArgs.create.password).toMatch(/^v1:[0-9a-f]+$/);
+    expect(upsertArgs.update.password.set).toMatch(/^v1:[0-9a-f]+$/);
   });
 });

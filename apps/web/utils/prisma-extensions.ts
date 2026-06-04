@@ -14,6 +14,7 @@ import { decryptToken, encryptToken } from "@/utils/encryption";
  */
 const ENCRYPTED_FIELDS = {
   account: ["access_token", "refresh_token"],
+  emailConnection: ["password"],
   calendarConnection: ["accessToken", "refreshToken"],
   driveConnection: ["accessToken", "refreshToken"],
   messagingChannel: ["accessToken", "refreshToken"],
@@ -50,6 +51,7 @@ function buildResult(spec: FieldSpec) {
 }
 
 export const __testing__ = {
+  ENCRYPTED_FIELDS,
   buildQuery,
   encryptCreateData,
   encryptUpdateData,
