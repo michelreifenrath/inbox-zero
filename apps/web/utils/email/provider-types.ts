@@ -1,3 +1,5 @@
+export const IMAP_PROVIDER = "imap";
+
 export function isGoogleProvider(
   provider: string | null | undefined,
 ): provider is "google" {
@@ -8,4 +10,10 @@ export function isMicrosoftProvider(
   provider: string | null | undefined,
 ): provider is "microsoft" {
   return provider === "microsoft";
+}
+
+export function isImapProvider(
+  provider: string | null | undefined,
+): provider is typeof IMAP_PROVIDER {
+  return provider === IMAP_PROVIDER;
 }
