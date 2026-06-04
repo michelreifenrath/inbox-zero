@@ -7,6 +7,7 @@ import {
   getAccessTokenFromClient as getOutlookAccessToken,
   getOutlookClientWithRefresh,
 } from "@/utils/outlook/client";
+import type { MailboxConnectionSettings } from "@/utils/email/imap/connection";
 import type { Logger } from "@/utils/logger";
 
 export async function getGmailClientForEmail({
@@ -81,6 +82,47 @@ export async function getOutlookAndAccessTokenForEmail({
   });
   const accessToken = getOutlookAccessToken(outlook);
   return { outlook, accessToken, tokens };
+}
+
+export async function getImapConnectionSettingsForEmail({
+  emailAccountId,
+}: {
+  emailAccountId: string;
+}): Promise<MailboxConnectionSettings> {
+  const emailConnection = await prisma.emailConnection.findUnique({
+    where: { emailAccountId },
+    select: {
+      imapHost: true,
+      imapPort: true,
+      imapSecure: true,
+      smtpHost: true,
+      smtpPort: true,
+      smtpSecure: true,
+      username: true,
+      password: true,
+    },
+  });
+
+  if (!emailConnection) {
+    throw new Error(
+      `IMAP connection not found for email account: ${emailAccountId}`,
+    );
+  }
+
+  return {
+    imap: {
+      host: emailConnection.imapHost,
+      port: emailConnection.imapPort,
+      secure: emailConnection.imapSecure,
+    },
+    smtp: {
+      host: emailConnection.smtpHost,
+      port: emailConnection.smtpPort,
+      secure: emailConnection.smtpSecure,
+    },
+    username: emailConnection.username,
+    password: emailConnection.password,
+  };
 }
 
 export async function getOutlookClientForEmailId({
