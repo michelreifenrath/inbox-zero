@@ -176,6 +176,8 @@ model EmailAccount {
   accountId String  @unique
   account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
+  emailConnection EmailConnection?
+
   labels           Label[]
   rules            Rule[]
   executedRules    ExecutedRule[]
@@ -1130,6 +1132,32 @@ model ChatMemory {
   emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
 
   @@index([emailAccountId])
+}
+
+model EmailConnection {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  protocol String @default("imap")
+  preset   String?
+
+  imapHost   String
+  imapPort   Int
+  imapSecure Boolean @default(true)
+  smtpHost   String
+  smtpPort   Int
+  smtpSecure Boolean @default(true)
+
+  username    String
+  password    String
+  isConnected Boolean @default(true)
+
+  syncCursor   String?
+  lastSyncedAt DateTime?
+
+  emailAccountId String       @unique
+  emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
 }
 
 model CalendarConnection {
