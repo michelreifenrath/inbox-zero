@@ -58,6 +58,7 @@ const enabledLoginProviders = getEnabledLoginProviders();
 const googleLoginEnabled = enabledLoginProviders.has("google");
 const microsoftLoginEnabled = enabledLoginProviders.has("microsoft");
 const appleLoginEnabled = enabledLoginProviders.has("apple");
+const credentialsLoginEnabled = enabledLoginProviders.has("credentials");
 
 type AppleProfile = {
   email?: string;
@@ -211,7 +212,7 @@ export const betterAuthConfig = betterAuth({
   ],
   secret: env.AUTH_SECRET || env.NEXTAUTH_SECRET,
   emailAndPassword: {
-    enabled: false,
+    enabled: credentialsLoginEnabled,
   },
   database: prismaAdapter(prisma, {
     provider: "postgresql",
