@@ -113,6 +113,7 @@ type ImapFetchMessage = {
 
 type MessagePageOptions = {
   mailbox?: string;
+  allMailboxes?: boolean;
   query?: string;
   maxResults?: number;
   pageToken?: string;
@@ -123,7 +124,8 @@ type MessagePageOptions = {
 };
 
 type PageToken = {
-  mailbox: string;
+  mailbox?: string;
+  allMailboxes?: boolean;
   offset: number;
 };
 
@@ -257,6 +259,7 @@ export class ImapProvider implements EmailProvider {
   }): Promise<{ messages: ParsedMessage[]; nextPageToken?: string }> {
     return this.getMessagePage({
       mailbox: options.inboxOnly === false ? undefined : INBOX,
+      allMailboxes: options.inboxOnly === false,
       query: options.query,
       maxResults: options.maxResults,
       pageToken: options.pageToken,
@@ -395,23 +398,19 @@ export class ImapProvider implements EmailProvider {
 
   async getThreadMessages(threadId: string): Promise<ParsedMessage[]> {
     return this.withClient(async (client) => {
-      const normalizedThreadId = normalizeMessageId(threadId) || threadId;
-      const uids = await this.searchUids(client, INBOX, {
-        or: [
-          { header: { "message-id": `<${normalizedThreadId}>` } },
-          { header: { references: normalizedThreadId } },
-          { header: { "in-reply-to": `<${normalizedThreadId}>` } },
-        ],
-      });
-      const messages = await this.fetchMessagesByUid(client, INBOX, uids);
-      return messages
-        .filter((message) => message.threadId === normalizedThreadId)
-        .sort(sortMessagesOldestFirst);
+      const folders = await client.list();
+      return this.getThreadMessagesFromMailboxes(
+        client,
+        threadId,
+        folders.map((folder) => folder.path),
+      );
     });
   }
 
   async getThreadMessagesInInbox(threadId: string): Promise<ParsedMessage[]> {
-    return this.getThreadMessages(threadId);
+    return this.withClient((client) =>
+      this.getThreadMessagesFromMailboxes(client, threadId, [INBOX]),
+    );
   }
 
   async getThreadsWithQuery(options: {
@@ -759,8 +758,20 @@ export class ImapProvider implements EmailProvider {
     const token = options.pageToken
       ? decodePageToken(options.pageToken)
       : undefined;
-    const mailbox = token?.mailbox || options.mailbox || INBOX;
+    const allMailboxes = token
+      ? token.allMailboxes === true
+      : options.allMailboxes === true;
     const offset = token?.offset || 0;
+
+    if (allMailboxes) {
+      return this.getMessagePageAcrossMailboxesWithClient(
+        client,
+        options,
+        offset,
+      );
+    }
+
+    const mailbox = token?.mailbox || options.mailbox || INBOX;
     const uids = await this.searchUids(client, mailbox, {
       all: true,
       from: options.from,
@@ -785,6 +796,67 @@ export class ImapProvider implements EmailProvider {
           ? encodePageToken({ mailbox, offset: offset + pageSize })
           : undefined,
     };
+  }
+
+  private async getMessagePageAcrossMailboxesWithClient(
+    client: ImapProviderClient,
+    options: MessagePageOptions,
+    offset: number,
+  ): Promise<{ messages: ParsedMessage[]; nextPageToken?: string }> {
+    const pageSize = options.maxResults || DEFAULT_PAGE_SIZE;
+    const folders = await client.list();
+    const messages: ParsedMessage[] = [];
+
+    for (const folder of folders) {
+      const uids = await this.searchUids(client, folder.path, {
+        all: true,
+        from: options.from,
+        text: options.query,
+        before: options.before,
+        since: options.after,
+        seen: options.unreadOnly ? false : undefined,
+      });
+      messages.push(
+        ...(await this.fetchMessagesByUid(client, folder.path, uids)),
+      );
+    }
+
+    const sortedMessages = messages.sort(
+      (left, right) => getMessageTimestamp(right) - getMessageTimestamp(left),
+    );
+    const pageMessages = sortedMessages.slice(offset, offset + pageSize);
+
+    return {
+      messages: pageMessages,
+      nextPageToken:
+        offset + pageSize < sortedMessages.length
+          ? encodePageToken({ allMailboxes: true, offset: offset + pageSize })
+          : undefined,
+    };
+  }
+
+  private async getThreadMessagesFromMailboxes(
+    client: ImapProviderClient,
+    threadId: string,
+    mailboxes: string[],
+  ) {
+    const normalizedThreadId = normalizeMessageId(threadId) || threadId;
+    const messages: ParsedMessage[] = [];
+
+    for (const mailbox of mailboxes) {
+      const uids = await this.searchUids(client, mailbox, {
+        or: [
+          { header: { "message-id": `<${normalizedThreadId}>` } },
+          { header: { references: normalizedThreadId } },
+          { header: { "in-reply-to": `<${normalizedThreadId}>` } },
+        ],
+      });
+      messages.push(...(await this.fetchMessagesByUid(client, mailbox, uids)));
+    }
+
+    return messages
+      .filter((message) => message.threadId === normalizedThreadId)
+      .sort(sortMessagesOldestFirst);
   }
 
   private async searchUids(
@@ -1057,13 +1129,16 @@ function decodePageToken(pageToken: string): PageToken {
     const decoded = JSON.parse(
       Buffer.from(pageToken, "base64url").toString("utf8"),
     );
-    if (
-      typeof decoded.mailbox !== "string" ||
-      typeof decoded.offset !== "number"
-    ) {
+    if (typeof decoded.offset !== "number") {
       throw new Error("invalid shape");
     }
-    return decoded;
+    if (decoded.allMailboxes === true) {
+      return { allMailboxes: true, offset: decoded.offset };
+    }
+    if (typeof decoded.mailbox !== "string") {
+      throw new Error("invalid shape");
+    }
+    return { mailbox: decoded.mailbox, offset: decoded.offset };
   } catch {
     throw new Error("Invalid IMAP page token.");
   }

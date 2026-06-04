@@ -123,6 +123,60 @@ describe("ImapProvider", () => {
     expect(secondPage.nextPageToken).toBeUndefined();
   });
 
+  it("returns all-folder paginated messages when inboxOnly is false", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Archive", name: "Archive", delimiter: "/" },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "inbox@example.com",
+            "Inbox",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+        Archive: [
+          buildStoredMessage(
+            2,
+            "archive@example.com",
+            "Archive",
+            "2030-01-01T10:00:00.000Z",
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    const firstPage = await provider.getMessagesWithPagination({
+      maxResults: 1,
+      inboxOnly: false,
+    });
+
+    expect(firstPage.messages.map((message) => message.id)).toEqual([
+      "Archive:2",
+    ]);
+    expect(firstPage.messages.map((message) => message.parentFolderId)).toEqual(
+      ["Archive"],
+    );
+    expect(firstPage.nextPageToken).toBeTruthy();
+
+    const secondPage = await provider.getMessagesWithPagination({
+      maxResults: 1,
+      inboxOnly: false,
+      pageToken: firstPage.nextPageToken,
+    });
+
+    expect(secondPage.messages.map((message) => message.id)).toEqual([
+      "INBOX:1",
+    ]);
+    expect(secondPage.nextPageToken).toBeUndefined();
+  });
+
   it("uses the IMAP sent special-use folder for sent message listing", async () => {
     const client = new MockImapClient({
       folders: [
@@ -194,6 +248,50 @@ describe("ImapProvider", () => {
       "Root",
       "Re: Root",
     ]);
+  });
+
+  it("fetches full thread messages across folders and filters inbox thread messages", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Sent", name: "Sent", delimiter: "/", specialUse: "\\Sent" },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+        Sent: [
+          buildStoredMessage(
+            2,
+            "reply@example.com",
+            "Re: Root",
+            "2030-01-01T10:00:00.000Z",
+            {
+              references: "<root@example.com>",
+              inReplyTo: "<root@example.com>",
+            },
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    const allMessages = await provider.getThreadMessages("root@example.com");
+    const inboxMessages =
+      await provider.getThreadMessagesInInbox("root@example.com");
+
+    expect(allMessages.map((message) => message.id)).toEqual([
+      "INBOX:1",
+      "Sent:2",
+    ]);
+    expect(inboxMessages.map((message) => message.id)).toEqual(["INBOX:1"]);
   });
 
   it("throws clear errors for unsupported read-only operations", async () => {
