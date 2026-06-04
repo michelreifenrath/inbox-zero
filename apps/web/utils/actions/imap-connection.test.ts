@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
+import { verifyMailboxConnection } from "@/utils/email/imap/connection";
 import { STRATO_IMAP_PRESET } from "@/utils/email/imap-presets";
+import { SafeError } from "@/utils/error";
 import { connectStratoMailboxAction } from "./imap-connection";
 
 vi.mock("@/utils/prisma");
+vi.mock("@/utils/email/imap/connection", () => ({
+  verifyMailboxConnection: vi.fn(),
+}));
 vi.mock("@/utils/auth", () => ({
   auth: vi.fn(async () => ({
     user: { id: "user-1", email: "user@example.com" },
@@ -32,9 +37,12 @@ const stratoConnectionData = {
   lastSyncedAt: null,
 };
 
+const mockedVerifyMailboxConnection = vi.mocked(verifyMailboxConnection);
+
 describe("connectStratoMailboxAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedVerifyMailboxConnection.mockResolvedValue(undefined);
     prisma.emailAccount.findUnique.mockResolvedValue(null);
     prisma.account.findUnique.mockResolvedValue(null);
     prisma.emailAccount.create.mockResolvedValue({
@@ -51,6 +59,12 @@ describe("connectStratoMailboxAction", () => {
       status: "created",
       emailAccountId: "email-account-1",
       email: "user@example.com",
+    });
+    expect(mockedVerifyMailboxConnection).toHaveBeenCalledWith({
+      imap: STRATO_IMAP_PRESET.imap,
+      smtp: STRATO_IMAP_PRESET.smtp,
+      username: "user@example.com",
+      password: "strato-password",
     });
     expect(prisma.emailAccount.create).toHaveBeenCalledWith({
       data: {
@@ -92,6 +106,7 @@ describe("connectStratoMailboxAction", () => {
     expect(result?.serverError).toBe(
       "Mailbox is already connected to another user.",
     );
+    expect(mockedVerifyMailboxConnection).not.toHaveBeenCalled();
     expect(prisma.emailAccount.create).not.toHaveBeenCalled();
     expect(prisma.account.update).not.toHaveBeenCalled();
     expect(prisma.emailConnection.create).not.toHaveBeenCalled();
@@ -116,6 +131,12 @@ describe("connectStratoMailboxAction", () => {
       emailAccountId: "existing-email-account",
       email: "user@example.com",
     });
+    expect(mockedVerifyMailboxConnection).toHaveBeenCalledWith({
+      imap: STRATO_IMAP_PRESET.imap,
+      smtp: STRATO_IMAP_PRESET.smtp,
+      username: "user@example.com",
+      password: "strato-password",
+    });
     expect(prisma.account.update).toHaveBeenCalledWith({
       where: { id: "account-1" },
       data: {
@@ -137,6 +158,24 @@ describe("connectStratoMailboxAction", () => {
     expect(JSON.stringify(result?.data)).not.toContain("strato-password");
   });
 
+  it("does not write credentials when connectivity verification fails", async () => {
+    mockedVerifyMailboxConnection.mockRejectedValue(
+      new SafeError(
+        "IMAP authentication failed. Check the mailbox email address and password.",
+      ),
+    );
+
+    const result = await connectStratoMailboxAction(input);
+
+    expect(result?.serverError).toBe(
+      "IMAP authentication failed. Check the mailbox email address and password.",
+    );
+    expect(prisma.emailAccount.create).not.toHaveBeenCalled();
+    expect(prisma.account.update).not.toHaveBeenCalled();
+    expect(prisma.emailConnection.create).not.toHaveBeenCalled();
+    expect(prisma.emailConnection.upsert).not.toHaveBeenCalled();
+  });
+
   it("returns validation errors without writing", async () => {
     const result = await connectStratoMailboxAction({
       email: "not-an-email",
@@ -145,6 +184,7 @@ describe("connectStratoMailboxAction", () => {
 
     expect(result?.validationErrors).toBeDefined();
     expect(result?.serverError).toBeUndefined();
+    expect(mockedVerifyMailboxConnection).not.toHaveBeenCalled();
     expect(prisma.emailAccount.findUnique).not.toHaveBeenCalled();
     expect(prisma.emailAccount.create).not.toHaveBeenCalled();
     expect(prisma.account.update).not.toHaveBeenCalled();

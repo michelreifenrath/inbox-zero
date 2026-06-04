@@ -3,6 +3,7 @@
 import { actionClientUser } from "@/utils/actions/safe-action";
 import { connectStratoMailboxBody } from "@/utils/actions/imap-connection.validation";
 import { SafeError } from "@/utils/error";
+import { verifyMailboxConnection } from "@/utils/email/imap/connection";
 import { STRATO_IMAP_PRESET } from "@/utils/email/imap-presets";
 import { IMAP_PROVIDER } from "@/utils/email/provider-types";
 import prisma from "@/utils/prisma";
@@ -68,13 +69,23 @@ export const connectStratoMailboxAction = actionClientUser
       throw new SafeError("Mailbox is already connected to another user.");
     }
 
-    if (existingEmailAccount) {
-      if (existingEmailAccount.account.provider !== IMAP_PROVIDER) {
-        throw new SafeError(
-          "Mailbox is already connected with another provider.",
-        );
-      }
+    if (
+      existingEmailAccount &&
+      existingEmailAccount.account.provider !== IMAP_PROVIDER
+    ) {
+      throw new SafeError(
+        "Mailbox is already connected with another provider.",
+      );
+    }
 
+    await verifyMailboxConnection({
+      imap: STRATO_IMAP_PRESET.imap,
+      smtp: STRATO_IMAP_PRESET.smtp,
+      username: email,
+      password: parsedInput.password,
+    });
+
+    if (existingEmailAccount) {
       await prisma.account.update({
         where: { id: existingEmailAccount.account.id },
         data: {
