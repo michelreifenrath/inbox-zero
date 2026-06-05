@@ -3,6 +3,7 @@ import { createTestLogger } from "@/__tests__/helpers";
 import prisma from "@/utils/__mocks__/prisma";
 import { cleanupInvalidTokens } from "@/utils/auth/cleanup-invalid-tokens";
 import { createEmailProvider } from "@/utils/email/provider";
+import { pollImapEmailAccounts } from "@/utils/email/imap/sync";
 import { captureException } from "@/utils/error";
 import { ensureEmailAccountsWatched } from "./watch-manager";
 
@@ -14,6 +15,10 @@ vi.mock("@/utils/auth/cleanup-invalid-tokens", () => ({
 
 vi.mock("@/utils/email/provider", () => ({
   createEmailProvider: vi.fn(),
+}));
+
+vi.mock("@/utils/email/imap/sync", () => ({
+  pollImapEmailAccounts: vi.fn(),
 }));
 
 vi.mock("@/utils/error", () => ({
@@ -38,6 +43,60 @@ const logger = createTestLogger();
 describe("ensureEmailAccountsWatched", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("polls IMAP accounts instead of setting up provider push watches", async () => {
+    vi.mocked(prisma.emailAccount.findMany).mockResolvedValue([
+      {
+        id: "imap-email-account-id",
+        email: "imap@example.com",
+        watchEmailsExpirationDate: null,
+        watchEmailsSubscriptionId: null,
+        account: {
+          provider: "imap",
+          access_token: null,
+          refresh_token: null,
+          expires_at: null,
+          disconnectedAt: null,
+        },
+        user: {
+          id: "user-id",
+          aiApiKey: null,
+          premium: null,
+        },
+      },
+    ] as any);
+
+    vi.mocked(pollImapEmailAccounts).mockResolvedValue([
+      {
+        status: "success",
+        emailAccountId: "imap-email-account-id",
+        mailbox: "INBOX",
+        processed: 2,
+        lastUid: 10,
+        uidValidity: "123",
+        uidValidityChanged: false,
+      },
+    ]);
+
+    const results = await ensureEmailAccountsWatched({
+      userIds: null,
+      logger,
+    });
+
+    expect(pollImapEmailAccounts).toHaveBeenCalledWith({
+      emailAccountIds: ["imap-email-account-id"],
+      logger: expect.any(Object),
+    });
+    expect(createEmailProvider).not.toHaveBeenCalled();
+    expect(results).toEqual([
+      {
+        emailAccountId: "imap-email-account-id",
+        status: "success",
+        syncType: "imap-poll",
+        messagesProcessed: 2,
+      },
+    ]);
   });
 
   it("cleans up invalid tokens when watch setup reports a detailed invalid_grant error", async () => {
