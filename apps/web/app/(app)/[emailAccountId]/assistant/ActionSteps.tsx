@@ -119,9 +119,11 @@ export function ActionSteps({
     [actions],
   );
 
+  const defaultActionType = typeOptions[0]?.value ?? ActionType.LABEL;
+
   return (
     <RuleSteps
-      onAdd={() => append({ type: ActionType.LABEL })}
+      onAdd={() => append({ type: defaultActionType })}
       addButtonLabel="Add Action"
       addButtonDisabled={false}
     >
@@ -205,7 +207,8 @@ function ActionCard({
       (action): action is NonNullable<CreateRuleBody["actions"][number]> =>
         Boolean(action),
     );
-  const rawActionType = primaryAction?.type ?? ActionType.LABEL;
+  const rawActionType =
+    primaryAction?.type ?? typeOptions[0]?.value ?? ActionType.LABEL;
   const actionType = isDraftReplyActionType(rawActionType)
     ? ActionType.DRAFT_EMAIL
     : rawActionType;

@@ -8,7 +8,7 @@ import { useThread } from "@/hooks/useThread";
 import { LoadingContent } from "@/components/LoadingContent";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAccount } from "@/providers/EmailAccountProvider";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import { isGoogleProvider, isImapProvider } from "@/utils/email/provider-types";
 import { MutedText } from "@/components/Typography";
 
 export function EmailViewer() {
@@ -37,7 +37,12 @@ export function EmailViewer() {
           )
         ) : (
           <div className="flex h-full items-center justify-center">
-            <MutedText>This feature isn't enabled for Outlook.</MutedText>
+            <MutedText>
+              This email viewer is only available for Gmail accounts
+              {isImapProvider(provider)
+                ? "; IMAP mailboxes use basic list views."
+                : "."}
+            </MutedText>
           </div>
         )}
       </SheetContent>

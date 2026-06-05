@@ -59,7 +59,11 @@ import {
 import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { prefixPath } from "@/utils/path";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import {
+  isGoogleProvider,
+  isImapProvider,
+  supportsBulkSenderActions,
+} from "@/utils/email/provider-types";
 import { NavUser } from "@/components/NavUser";
 import { PremiumCard } from "@/components/PremiumCard";
 
@@ -105,16 +109,20 @@ export const useNavigation = () => {
 
   const cleanupItems: NavItem[] = useMemo(
     () => [
-      {
-        name: "Bulk Unsubscribe",
-        href: prefixPath(currentEmailAccountId, "/bulk-unsubscribe"),
-        icon: MailsIcon,
-      },
-      {
-        name: "Bulk Archive",
-        href: prefixPath(currentEmailAccountId, "/bulk-archive"),
-        icon: ArchiveIcon,
-      },
+      ...(supportsBulkSenderActions(provider)
+        ? [
+            {
+              name: "Bulk Unsubscribe",
+              href: prefixPath(currentEmailAccountId, "/bulk-unsubscribe"),
+              icon: MailsIcon,
+            },
+            {
+              name: "Bulk Archive",
+              href: prefixPath(currentEmailAccountId, "/bulk-archive"),
+              icon: ArchiveIcon,
+            },
+          ]
+        : []),
       {
         name: "Analytics",
         href: prefixPath(currentEmailAccountId, "/stats"),
@@ -197,6 +205,19 @@ const topMailLinks: NavItem[] = [
     name: "Archived",
     icon: ArchiveIcon,
     href: "?type=archive",
+  },
+];
+
+const imapTopMailLinks: NavItem[] = [
+  {
+    name: "Inbox",
+    icon: InboxIcon,
+    href: "?type=inbox",
+  },
+  {
+    name: "Sent",
+    icon: SendIcon,
+    href: "?type=sent",
   },
 ];
 
@@ -336,6 +357,7 @@ function MailNav({ path }: { path: string }) {
   const { visibleLabels, hiddenLabels, isLoading } = useSplitLabels();
   const { provider } = useAccount();
   const terminology = getEmailTerminology(provider);
+  const isImap = isImapProvider(provider);
 
   // Transform user labels into NavItems
   const labelNavItems = useMemo(() => {
@@ -384,12 +406,17 @@ function MailNav({ path }: { path: string }) {
       </SidebarGroup>
 
       <SidebarGroup>
-        <SideNavMenu items={topMailLinks} activeHref={path} />
+        <SideNavMenu
+          items={isImap ? imapTopMailLinks : topMailLinks}
+          activeHref={path}
+        />
       </SidebarGroup>
-      <SidebarGroup>
-        <SidebarGroupLabel>Categories</SidebarGroupLabel>
-        <SideNavMenu items={bottomMailLinks} activeHref={path} />
-      </SidebarGroup>
+      {!isImap && (
+        <SidebarGroup>
+          <SidebarGroupLabel>Categories</SidebarGroupLabel>
+          <SideNavMenu items={bottomMailLinks} activeHref={path} />
+        </SidebarGroup>
+      )}
 
       <SidebarGroup>
         <SidebarGroupLabel>

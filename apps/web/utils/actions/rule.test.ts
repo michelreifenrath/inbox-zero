@@ -225,4 +225,57 @@ describe("updateRuleAction", () => {
       }),
     );
   });
+
+  it("rejects IMAP provider-write actions before creating a provider", async () => {
+    (
+      prisma.emailAccount.findUnique as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      email: "owner@example.com",
+      account: { userId: "u1", provider: "imap" },
+    });
+
+    const result = await updateRuleAction(
+      "account-1" as never,
+      {
+        id: "rule-1",
+        name: "Updated rule",
+        instructions: null,
+        groupId: null,
+        runOnThreads: true,
+        digest: false,
+        actions: [
+          {
+            type: ActionType.ARCHIVE,
+            messagingChannelId: null,
+            labelId: null,
+            subject: null,
+            content: null,
+            to: null,
+            cc: null,
+            bcc: null,
+            url: null,
+            folderName: null,
+            folderId: null,
+            delayInMinutes: null,
+          },
+        ],
+        conditions: [
+          {
+            type: ConditionType.STATIC,
+            instructions: null,
+            to: null,
+            from: "sender@example.com",
+            subject: null,
+            body: null,
+          },
+        ],
+        conditionalOperator: "AND",
+        systemType: null,
+      } as never,
+    );
+
+    expect(result?.serverError).toContain("isn't supported for IMAP accounts");
+    expect(createEmailProviderMock).not.toHaveBeenCalled();
+    expect(prisma.rule.update).not.toHaveBeenCalled();
+  });
 });

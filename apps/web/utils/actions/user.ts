@@ -23,6 +23,10 @@ import {
   getConfiguredDraftCleanupDays,
 } from "@/utils/ai/draft-cleanup";
 import { isNotFoundError } from "@/utils/prisma-helpers";
+import {
+  IMAP_UNSUPPORTED_DRAFT_FEATURE_MESSAGE,
+  supportsProviderStoredDrafts,
+} from "@/utils/email/provider-types";
 
 export const saveAboutAction = actionClient
   .metadata({ name: "saveAbout" })
@@ -96,14 +100,23 @@ export const cleanupAIDraftsAction = actionClient
 export const updateAIDraftCleanupSettingsAction = actionClient
   .metadata({ name: "updateAIDraftCleanupSettings" })
   .inputSchema(updateAIDraftCleanupSettingsBody)
-  .action(async ({ parsedInput: { cleanupDays }, ctx: { emailAccountId } }) => {
-    await prisma.emailAccount.update({
-      where: { id: emailAccountId },
-      data: { draftCleanupDays: cleanupDays },
-    });
+  .action(
+    async ({
+      parsedInput: { cleanupDays },
+      ctx: { emailAccountId, provider },
+    }) => {
+      if (!supportsProviderStoredDrafts(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_DRAFT_FEATURE_MESSAGE);
+      }
 
-    return { cleanupDays };
-  });
+      await prisma.emailAccount.update({
+        where: { id: emailAccountId },
+        data: { draftCleanupDays: cleanupDays },
+      });
+
+      return { cleanupDays };
+    },
+  );
 
 export const deleteEmailAccountAction = actionClientUser
   .metadata({ name: "deleteEmailAccount" })

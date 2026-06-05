@@ -38,7 +38,10 @@ import { toastError, toastSuccess } from "@/components/Toast";
 import { getEmailTerminology } from "@/utils/terminology";
 import { getGmailBasicSearchUrl } from "@/utils/url";
 import { FOLLOW_UP_LABEL } from "@/utils/label";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import {
+  isGoogleProvider,
+  supportsProviderWriteActions,
+} from "@/utils/email/provider-types";
 import { env } from "@/env";
 
 export function FollowUpRemindersSetting() {
@@ -51,7 +54,9 @@ export function FollowUpRemindersSetting() {
 
 function FollowUpRemindersSettingContent() {
   const [open, setOpen] = useState(false);
+  const { provider } = useAccount();
   const { data, isLoading, mutate } = useEmailAccountFull();
+  const canUseFollowUps = supportsProviderWriteActions(provider);
 
   const enabled =
     data?.followUpAwaitingReplyDays !== null ||
@@ -87,7 +92,11 @@ function FollowUpRemindersSettingContent() {
   return (
     <SettingCard
       title="Follow-up reminders"
-      description="Label emails where you haven't heard back or haven't replied."
+      description={
+        canUseFollowUps
+          ? "Label emails where you haven't heard back or haven't replied."
+          : "Follow-up reminders aren't supported for IMAP accounts because they require provider labels."
+      }
       right={
         isLoading ? (
           <Skeleton className="h-5 w-9" />
@@ -113,7 +122,7 @@ function FollowUpRemindersSettingContent() {
               name="follow-up-enabled"
               enabled={enabled}
               onChange={handleToggle}
-              disabled={!data}
+              disabled={!data || !canUseFollowUps}
             />
           </div>
         )

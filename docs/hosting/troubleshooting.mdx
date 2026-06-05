@@ -107,6 +107,20 @@ Check logs for errors using the commands above.
 - Check that `GOOGLE_PUBSUB_TOPIC_NAME` and `GOOGLE_PUBSUB_VERIFICATION_TOKEN` are set in your `.env`.
 - Verify the Gmail service account (`gmail-api-push@system.gserviceaccount.com`) has the **Pub/Sub Publisher** role on your topic.
 
+## IMAP / STRATO Mailboxes
+
+**STRATO mailbox connection fails:**
+- Use the full mailbox email address as the username.
+- Use the mailbox password from STRATO email administration, not the customer/control panel password unless they are intentionally the same.
+- Confirm IMAP `imap.strato.de:993` and SMTP `smtp.strato.de:465` both use SSL/TLS.
+
+**New STRATO mail is delayed:**
+- IMAP mailboxes are polled periodically instead of watched through provider push notifications.
+- Wait for the next scheduled sync job and check logs for IMAP polling errors.
+
+**Archive, labels, filters, or AI draft cleanup are unavailable:**
+- This is expected for generic IMAP accounts. See [IMAP and STRATO](/hosting/imap-strato#imap-limitations) for the supported feature list.
+
 ## Rate Limiting
 
 **Rate limited by email provider (Gmail/Outlook):**

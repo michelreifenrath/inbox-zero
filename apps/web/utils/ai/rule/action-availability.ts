@@ -1,6 +1,9 @@
 import { env } from "@/env";
 import { ActionType } from "@/generated/prisma/enums";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 
 export function getAvailableActionsForRuleEditor({
   provider,
@@ -15,6 +18,7 @@ export function getAvailableActionsForRuleEditor({
   const supportsMoveFolder =
     isMicrosoftProvider(provider) ||
     includesExistingActionType(ActionType.MOVE_FOLDER);
+  const supportsProviderWriteActions = !isImapProvider(provider);
   // The rule editor exposes a single "Draft reply" option for both persisted
   // draft action variants, so the UI only needs the normalized DRAFT_EMAIL type.
   const showsDraftReplyOption =
@@ -23,14 +27,20 @@ export function getAvailableActionsForRuleEditor({
     includesExistingActionType(ActionType.DRAFT_MESSAGING_CHANNEL);
 
   return [
-    ActionType.LABEL,
-    ...(supportsMoveFolder ? [ActionType.MOVE_FOLDER] : []),
-    ActionType.ARCHIVE,
-    ActionType.MARK_READ,
-    ActionType.STAR,
-    ...(showsDraftReplyOption ? [ActionType.DRAFT_EMAIL] : []),
+    ...(supportsProviderWriteActions ? [ActionType.LABEL] : []),
+    ...(supportsMoveFolder && supportsProviderWriteActions
+      ? [ActionType.MOVE_FOLDER]
+      : []),
+    ...(supportsProviderWriteActions
+      ? [
+          ActionType.ARCHIVE,
+          ActionType.MARK_READ,
+          ActionType.STAR,
+          ...(showsDraftReplyOption ? [ActionType.DRAFT_EMAIL] : []),
+        ]
+      : []),
     ...getAvailableSendActions(existingActionTypes),
-    ActionType.MARK_SPAM,
+    ...(supportsProviderWriteActions ? [ActionType.MARK_SPAM] : []),
   ] as ActionType[];
 }
 

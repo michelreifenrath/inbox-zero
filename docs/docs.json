@@ -87,6 +87,7 @@
               "hosting/google-oauth",
               "hosting/google-pubsub",
               "hosting/microsoft-oauth",
+              "hosting/imap-strato",
               "hosting/sso",
               "hosting/llm-setup"
             ]

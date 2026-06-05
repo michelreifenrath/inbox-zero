@@ -88,4 +88,22 @@ describe("bulkArchiveAction", () => {
       "account-1",
     );
   });
+
+  it("rejects IMAP accounts before creating a provider", async () => {
+    prisma.emailAccount.findUnique.mockResolvedValue(
+      getMockEmailAccountWithAccount({
+        email: "owner@example.com",
+        userId: "user-1",
+        provider: "imap",
+      }),
+    );
+
+    const result = await bulkArchiveAction("account-1", {
+      froms: ["sender@example.com"],
+    });
+
+    expect(result?.serverError).toContain("isn't supported for IMAP accounts");
+    expect(mockCreateEmailProvider).not.toHaveBeenCalled();
+    expect(mockBulkArchiveFromSenders).not.toHaveBeenCalled();
+  });
 });

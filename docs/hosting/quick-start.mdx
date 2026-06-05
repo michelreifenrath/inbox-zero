@@ -16,7 +16,7 @@ Then open [http://localhost:3000](http://localhost:3000) (or your domain).
   **Prerequisites:** [Docker](https://docs.docker.com/engine/install/) and [Node.js](https://nodejs.org/) v24+ must be installed.
 </Info>
 
-The CLI will walk you through configuring [Google OAuth](/hosting/google-oauth) or [Microsoft OAuth](/hosting/microsoft-oauth) and your AI provider. For manual configuration, see the [Setup Guides](/hosting/setup-guides).
+The CLI will walk you through configuring [Google OAuth](/hosting/google-oauth) or [Microsoft OAuth](/hosting/microsoft-oauth) and your AI provider. STRATO and custom IMAP/SMTP mailboxes can also be added from the app; see [IMAP and STRATO](/hosting/imap-strato) for settings, polling behavior, and limitations. For manual configuration, see the [Setup Guides](/hosting/setup-guides).
 
 <Info>
   **CLI is optional:** The setup command is a convenience wrapper that helps prepare your `.env` and run Docker Compose with sensible defaults.
@@ -85,6 +85,9 @@ Need to remove Inbox Zero or start fresh? See the [full cleanup guide](/hosting/
   </Card>
   <Card title="Microsoft OAuth" icon="microsoft" href="/hosting/microsoft-oauth">
     Configure Azure app registration and Graph permissions.
+  </Card>
+  <Card title="IMAP and STRATO" icon="mail" href="/hosting/imap-strato">
+    Connect STRATO or custom IMAP/SMTP mailboxes.
   </Card>
   <Card title="All Guides" icon="wrench" href="/hosting/setup-guides">
     PubSub, AI providers, and more manual configuration options.

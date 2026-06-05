@@ -4,6 +4,7 @@ import { createEmailProvider } from "@/utils/email/provider";
 import { isDraftUnmodified } from "@/utils/ai/choose-rule/draft-management";
 import type { Logger } from "@/utils/logger";
 import { DEFAULT_AI_DRAFT_CLEANUP_DAYS } from "@/utils/ai/draft-cleanup-settings";
+import { supportsProviderStoredDrafts } from "@/utils/email/provider-types";
 
 export async function cleanupAIDraftsForAccount({
   emailAccountId,
@@ -16,6 +17,17 @@ export async function cleanupAIDraftsForAccount({
   logger: Logger;
   cleanupDays: number;
 }) {
+  if (!supportsProviderStoredDrafts(providerName)) {
+    return {
+      total: 0,
+      deleted: 0,
+      skippedModified: 0,
+      alreadyGone: 0,
+      errors: 0,
+      cleanupDays,
+    };
+  }
+
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - cleanupDays);
 

@@ -10,9 +10,12 @@ import { ActionType, SystemType } from "@/generated/prisma/enums";
 import { LoadingContent } from "@/components/LoadingContent";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SettingCard } from "@/components/SettingCard";
+import { supportsProviderStoredDrafts } from "@/utils/email/provider-types";
 
 export function DraftReplies() {
+  const { provider } = useAccount();
   const { enabled, toggleDraftReplies, loading, error } = useDraftReplies();
+  const canDraftReplies = supportsProviderStoredDrafts(provider);
 
   const handleToggle = useCallback(
     async (enable: boolean) => {
@@ -30,7 +33,11 @@ export function DraftReplies() {
   return (
     <SettingCard
       title="Auto draft replies"
-      description="Automatically draft replies written in your tone to emails needing a reply."
+      description={
+        canDraftReplies
+          ? "Automatically draft replies written in your tone to emails needing a reply."
+          : "Auto draft replies aren't supported for IMAP accounts because provider-stored drafts aren't available."
+      }
       right={
         <LoadingContent
           loading={loading}
@@ -41,6 +48,7 @@ export function DraftReplies() {
             name="draft-replies"
             enabled={enabled}
             onChange={handleToggle}
+            disabled={!canDraftReplies}
           />
         </LoadingContent>
       }

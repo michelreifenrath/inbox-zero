@@ -51,7 +51,13 @@ import { createEmailProvider } from "@/utils/email/provider";
 import { resolveLabelNameAndId } from "@/utils/label/resolve-label";
 import type { Logger } from "@/utils/logger";
 import { validateGmailLabelName } from "@/utils/gmail/label-validation";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import {
+  IMAP_UNSUPPORTED_DRAFT_FEATURE_MESSAGE,
+  IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE,
+  isGoogleProvider,
+  supportsProviderStoredDrafts,
+  supportsProviderWriteActions,
+} from "@/utils/email/provider-types";
 import { bulkProcessInboxEmails } from "@/utils/ai/choose-rule/bulk-process-emails";
 import { getEmailAccountForRuleExecution } from "@/utils/user/get";
 import type { AttachmentSourceInput } from "@/utils/attachments/source-schema";
@@ -72,6 +78,7 @@ export const createRuleAction = actionClient
       },
     }) => {
       await assertCanUseDigestsIfNeeded(userId, actions ?? []);
+      assertProviderSupportsRuleActions(provider, actions ?? []);
 
       const conditions = flattenConditions(conditionsInput, logger);
 
@@ -126,6 +133,7 @@ export const updateRuleAction = actionClient
       },
     }) => {
       await assertCanUseDigestsIfNeeded(userId, actions);
+      assertProviderSupportsRuleActions(provider, actions);
 
       const conditions = flattenConditions(conditionsInput, logger);
 
@@ -194,6 +202,9 @@ export const enableDraftRepliesAction = actionClient
       parsedInput: { enable },
     }) => {
       if (env.NEXT_PUBLIC_AUTO_DRAFT_DISABLED && enable) return;
+      if (enable && !supportsProviderStoredDrafts(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_DRAFT_FEATURE_MESSAGE);
+      }
 
       const existingRule = await prisma.rule.findUnique({
         where: {
@@ -856,6 +867,38 @@ function handleRuleError(error: unknown, logger: Logger) {
   }
   logger.error("Error creating/updating rule", { error });
   throw new SafeError("Error creating/updating rule");
+}
+
+function assertProviderSupportsRuleActions(
+  provider: string,
+  actions: { type: ActionType }[],
+) {
+  if (!supportsProviderWriteActions(provider)) {
+    const hasProviderWriteAction = actions.some((action) =>
+      [
+        ActionType.ARCHIVE,
+        ActionType.LABEL,
+        ActionType.MARK_READ,
+        ActionType.MARK_SPAM,
+        ActionType.MOVE_FOLDER,
+        ActionType.STAR,
+      ].includes(action.type),
+    );
+
+    if (hasProviderWriteAction) {
+      throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+    }
+  }
+
+  if (!supportsProviderStoredDrafts(provider)) {
+    const hasProviderDraftAction = actions.some(
+      (action) => action.type === ActionType.DRAFT_EMAIL,
+    );
+
+    if (hasProviderDraftAction) {
+      throw new SafeError(IMAP_UNSUPPORTED_DRAFT_FEATURE_MESSAGE);
+    }
+  }
 }
 
 async function resolveActionLabels<

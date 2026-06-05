@@ -173,9 +173,15 @@ export const undoCleanInboxAction = actionClient
   .inputSchema(undoCleanInboxSchema)
   .action(
     async ({
-      ctx: { emailAccountId, logger },
+      ctx: { emailAccountId, provider, logger },
       parsedInput: { threadId, markedDone, action },
     }) => {
+      if (!isGoogleProvider(provider)) {
+        throw new SafeError(
+          "Clean inbox is only supported for Google accounts",
+        );
+      }
+
       const gmail = await getGmailClientForEmail({ emailAccountId, logger });
 
       // nothing to do atm if wasn't marked done
@@ -238,9 +244,15 @@ export const changeKeepToDoneAction = actionClient
   .inputSchema(changeKeepToDoneSchema)
   .action(
     async ({
-      ctx: { emailAccountId, logger },
+      ctx: { emailAccountId, provider, logger },
       parsedInput: { threadId, action },
     }) => {
+      if (!isGoogleProvider(provider)) {
+        throw new SafeError(
+          "Clean inbox is only supported for Google accounts",
+        );
+      }
+
       const gmail = await getGmailClientForEmail({ emailAccountId, logger });
 
       // Get the label to add (archived or marked_read)
