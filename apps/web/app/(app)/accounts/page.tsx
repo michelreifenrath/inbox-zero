@@ -64,7 +64,10 @@ export default function AccountsPage() {
               onAccountDeleted={mutate}
             />
           ))}
-          <AddAccount />
+          <AddAccount
+            className="lg:col-span-2 xl:col-span-3"
+            onMailboxConnected={mutate}
+          />
         </div>
       </LoadingContent>
     </PageWrapper>

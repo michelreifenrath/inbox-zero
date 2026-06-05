@@ -20,7 +20,7 @@ const faqs: {
   {
     question: `Which email providers does ${BRAND_NAME} support?`,
     answer:
-      "We support Gmail, Google Workspace, and Microsoft Outlook email accounts.",
+      "We support Gmail, Google Workspace, Microsoft Outlook, STRATO, and custom IMAP email accounts.",
   },
   {
     question: "How can I request a feature?",
@@ -38,7 +38,7 @@ const faqs: {
   },
   {
     question: `Will ${BRAND_NAME} replace my current email client?`,
-    answer: `No! ${BRAND_NAME} isn't an email client. It's used alongside your existing email client. You use Google or Outlook as normal.`,
+    answer: `No! ${BRAND_NAME} isn't an email client. It's used alongside your existing email client, so you keep using your mailbox as normal.`,
   },
   {
     question: "Is the code open-source?",

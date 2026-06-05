@@ -3,7 +3,10 @@ import prisma from "@/utils/__mocks__/prisma";
 import { verifyMailboxConnection } from "@/utils/email/imap/connection";
 import { STRATO_IMAP_PRESET } from "@/utils/email/imap-presets";
 import { SafeError } from "@/utils/error";
-import { connectStratoMailboxAction } from "./imap-connection";
+import {
+  connectImapMailboxAction,
+  connectStratoMailboxAction,
+} from "./imap-connection";
 
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/email/imap/connection", () => ({
@@ -32,6 +35,35 @@ const stratoConnectionData = {
   smtpSecure: STRATO_IMAP_PRESET.smtp.secure,
   username: "user@example.com",
   password: "strato-password",
+  isConnected: true,
+  syncCursor: null,
+  lastSyncedAt: null,
+};
+
+const customInput = {
+  preset: "custom" as const,
+  email: "USER@EXAMPLE.COM ",
+  password: "custom-password",
+  username: "imap-user",
+  imapHost: "imap.example.com",
+  imapPort: 993,
+  imapSecure: true,
+  smtpHost: "smtp.example.com",
+  smtpPort: 587,
+  smtpSecure: false,
+};
+
+const customConnectionData = {
+  protocol: "imap",
+  preset: "custom",
+  imapHost: "imap.example.com",
+  imapPort: 993,
+  imapSecure: true,
+  smtpHost: "smtp.example.com",
+  smtpPort: 587,
+  smtpSecure: false,
+  username: "imap-user",
+  password: "custom-password",
   isConnected: true,
   syncCursor: null,
   lastSyncedAt: null,
@@ -89,6 +121,38 @@ describe("connectStratoMailboxAction", () => {
       },
     });
     expect(JSON.stringify(result?.data)).not.toContain("strato-password");
+  });
+
+  it("saves a valid custom IMAP mailbox with explicit server settings", async () => {
+    const result = await connectImapMailboxAction(customInput);
+
+    expect(result?.serverError).toBeUndefined();
+    expect(result?.data).toEqual({
+      status: "created",
+      emailAccountId: "email-account-1",
+      email: "user@example.com",
+    });
+    expect(mockedVerifyMailboxConnection).toHaveBeenCalledWith({
+      imap: {
+        host: "imap.example.com",
+        port: 993,
+        secure: true,
+      },
+      smtp: {
+        host: "smtp.example.com",
+        port: 587,
+        secure: false,
+      },
+      username: "imap-user",
+      password: "custom-password",
+    });
+    expect(prisma.emailConnection.create).toHaveBeenCalledWith({
+      data: {
+        ...customConnectionData,
+        emailAccountId: "email-account-1",
+      },
+    });
+    expect(JSON.stringify(result?.data)).not.toContain("custom-password");
   });
 
   it("rejects a duplicate mailbox already owned by another user", async () => {
