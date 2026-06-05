@@ -220,9 +220,7 @@ function isUnsafeAddress(address: string) {
 
   if (addressType === 6) {
     const normalizedAddress = address.toLowerCase();
-    const mappedIpv4Address = normalizedAddress.match(
-      /(?:::ffff:)(\d+\.\d+\.\d+\.\d+)$/,
-    )?.[1];
+    const mappedIpv4Address = getMappedIpv4Address(normalizedAddress);
     if (mappedIpv4Address) return isUnsafeAddress(mappedIpv4Address);
 
     const firstHextet = Number.parseInt(
@@ -239,6 +237,39 @@ function isUnsafeAddress(address: string) {
   }
 
   return false;
+}
+
+function getMappedIpv4Address(address: string) {
+  const dottedIpv4Address = address.match(
+    /(?:::ffff:)(\d+\.\d+\.\d+\.\d+)$/,
+  )?.[1];
+  if (dottedIpv4Address) return dottedIpv4Address;
+  if (address.includes(".")) return null;
+
+  const parts = address.includes("::")
+    ? expandCompressedIpv6Address(address)
+    : address.split(":");
+  if (parts.length !== 8) return null;
+
+  const hextets = parts.map((part) => Number.parseInt(part || "0", 16));
+  if (!hextets.every((hextet) => Number.isInteger(hextet))) return null;
+  if (hextets.slice(0, 5).some((hextet) => hextet !== 0)) return null;
+  if (hextets[5] !== 0xff_ff) return null;
+
+  const high = hextets[6] ?? 0;
+  const low = hextets[7] ?? 0;
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+}
+
+function expandCompressedIpv6Address(address: string) {
+  const [head = "", tail = ""] = address.split("::");
+  const headParts = head ? head.split(":") : [];
+  const tailParts = tail ? tail.split(":") : [];
+  const missingParts = 8 - headParts.length - tailParts.length;
+
+  if (missingParts < 0) return [];
+
+  return [...headParts, ...new Array(missingParts).fill("0"), ...tailParts];
 }
 
 function stripAddressBrackets(host: string) {

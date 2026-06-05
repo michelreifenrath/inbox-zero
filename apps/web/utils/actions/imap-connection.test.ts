@@ -189,6 +189,21 @@ describe("connectStratoMailboxAction", () => {
     expect(prisma.emailConnection.upsert).not.toHaveBeenCalled();
   });
 
+  it("rejects custom IPv4-mapped IPv6 loopback hosts before resolving or connecting", async () => {
+    const result = await connectImapMailboxAction({
+      ...customInput,
+      imapHost: "::ffff:7f00:1",
+    });
+
+    expect(result?.serverError).toBe("Mailbox server host is not allowed.");
+    expect(mockedLookup).not.toHaveBeenCalled();
+    expect(mockedVerifyMailboxConnection).not.toHaveBeenCalled();
+    expect(prisma.emailAccount.create).not.toHaveBeenCalled();
+    expect(prisma.account.update).not.toHaveBeenCalled();
+    expect(prisma.emailConnection.create).not.toHaveBeenCalled();
+    expect(prisma.emailConnection.upsert).not.toHaveBeenCalled();
+  });
+
   it("does not apply custom host checks to STRATO preset connections", async () => {
     const result = await connectStratoMailboxAction(input);
 

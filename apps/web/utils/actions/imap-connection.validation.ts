@@ -18,11 +18,6 @@ const hostnameSchema = z
   .min(1, "Server host is required")
   .max(255, "Server host is too long");
 
-const optionalHostnameSchema = z
-  .string()
-  .trim()
-  .max(255, "Server host is too long");
-
 const portSchema = z.coerce
   .number({ invalid_type_error: "Port is required" })
   .int("Port must be a whole number")
@@ -36,11 +31,11 @@ const stratoMailboxBody = z.object({
 });
 
 const stratoMailboxFormBody = stratoMailboxBody.extend({
-  username: z.string().trim().max(320, "Username is too long"),
-  imapHost: optionalHostnameSchema,
+  username: z.unknown(),
+  imapHost: z.unknown(),
   imapPort: z.unknown(),
   imapSecure: z.boolean(),
-  smtpHost: optionalHostnameSchema,
+  smtpHost: z.unknown(),
   smtpPort: z.unknown(),
   smtpSecure: z.boolean(),
 });
