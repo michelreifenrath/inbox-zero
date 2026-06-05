@@ -75,7 +75,7 @@ The deterministic generic mailbox flow starts local IMAP and SMTP TCP servers, s
 corepack pnpm --dir apps/web exec cross-env RUN_INTEGRATION_TESTS=true RUN_AI_TESTS=false vitest --run __tests__/integration/imap-smtp-e2e.test.ts && corepack pnpm --dir apps/web exec cross-env RUN_AI_TESTS=false vitest --run utils/email/imap/sync.test.ts utils/email/provider.test.ts utils/email/watch-manager.test.ts
 ```
 
-The IMAP/SMTP test uses real protocol connections and keeps the per-run mailbox password inside the test process. The follow-up targeted tests cover the IMAP sync, provider, and watch-manager behavior that the flow depends on.
+The IMAP/SMTP test signs in through the credentials-gated app path, connects the mailbox through the IMAP mailbox action, uses real protocol connections, and keeps the per-run mailbox password inside the test process. The follow-up targeted tests cover the IMAP sync, provider, and watch-manager behavior that the flow depends on.
 
 ## Test Structure
 

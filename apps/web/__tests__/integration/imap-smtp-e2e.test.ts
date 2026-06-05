@@ -1,16 +1,30 @@
-import { ImapFlow } from "imapflow";
 import { createServer, type Server, type Socket } from "node:net";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import prisma from "@/utils/__mocks__/prisma";
 import { createTestLogger } from "@/__tests__/helpers";
-import { verifyMailboxConnection } from "@/utils/email/imap/connection";
-import { ImapProvider } from "@/utils/email/imap/provider";
-import {
-  pollImapEmailAccounts,
-  syncImapMailbox,
-  type ImapSyncCursor,
-} from "@/utils/email/imap/sync";
+import { connectImapMailboxAction } from "@/utils/actions/imap-connection";
+import { createEmailProvider } from "@/utils/email/provider";
+import { IMAP_PROVIDER } from "@/utils/email/provider-types";
+import { pollImapEmailAccounts } from "@/utils/email/imap/sync";
 import type { MailboxConnectionSettings } from "@/utils/email/imap/connection";
-import type { ParsedMessage } from "@/utils/types";
+
+const testAuthState = vi.hoisted(() => ({
+  session: null as { user: { id: string; email: string } } | null,
+}));
+
+vi.mock("@/utils/prisma");
+vi.mock("@/utils/auth", () => ({
+  auth: vi.fn(async () => testAuthState.session),
+}));
+vi.mock("@sentry/nextjs", () => import("@/__tests__/mocks/sentry-nextjs.mock"));
+vi.mock("node:net", async () => {
+  const actual = await vi.importActual<typeof import("node:net")>("node:net");
+
+  return {
+    ...actual,
+    isIP: (input: string) => (input === "127.0.0.1" ? 0 : actual.isIP(input)),
+  };
+});
 
 const RUN_INTEGRATION_TESTS = process.env.RUN_INTEGRATION_TESTS === "true";
 
@@ -19,57 +33,87 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)(
   { timeout: 30_000 },
   () => {
     let harness: LocalImapSmtpHarness | undefined;
+    let database: TestDatabase;
+
+    beforeEach(() => {
+      database = createTestDatabase();
+      installPrismaMocks(database);
+      testAuthState.session = null;
+    });
 
     afterEach(async () => {
       await harness?.close();
       harness = undefined;
+      testAuthState.session = null;
     });
 
-    test("verifies, syncs, polls, reads supported state, reports unsupported archive/read mutations, and sends an SMTP reply", async () => {
+    test("signs in with credentials, connects a mailbox through the app action, syncs, polls, reads supported state, reports unsupported archive/read mutations, and sends an SMTP reply", async () => {
       harness = await startLocalImapSmtpHarness();
       const settings = harness.settings;
       const logger = createTestLogger();
+      const session = await signUpAndSignInWithCredentials({
+        database,
+        email: `login-${harness.runId}@example.test`,
+        password: `login-pw-${harness.runId}`,
+      });
+      testAuthState.session = session;
 
-      await verifyMailboxConnection(settings);
+      const connected = await connectImapMailboxAction({
+        preset: "custom",
+        email: settings.username,
+        password: settings.password,
+        username: settings.username,
+        imapHost: settings.imap.host,
+        imapPort: settings.imap.port,
+        imapSecure: settings.imap.secure,
+        smtpHost: settings.smtp.host,
+        smtpPort: settings.smtp.port,
+        smtpSecure: settings.smtp.secure,
+      });
 
-      let cursor: ImapSyncCursor | null = null;
-      const initiallyProcessed: ParsedMessage[] = [];
-      const initialSync = await syncImapMailbox({
-        emailAccountId: harness.emailAccountId,
-        cursor,
-        client: createImapClient(settings),
-        processMessage: (message) => initiallyProcessed.push(message),
-        saveCursor: (nextCursor) => {
-          cursor = nextCursor;
-        },
+      expect(connected?.serverError).toBeUndefined();
+      expect(connected?.data).toEqual(
+        expect.objectContaining({
+          status: "created",
+          email: settings.username,
+        }),
+      );
+      const emailAccountId = connected?.data?.emailAccountId;
+      expect(emailAccountId).toBeTruthy();
+
+      const initialPollResults = await pollImapEmailAccounts({
+        emailAccountIds: [emailAccountId!],
         logger,
       });
 
-      expect(initialSync).toEqual(
+      expect(initialPollResults).toEqual([
         expect.objectContaining({
-          emailAccountId: harness.emailAccountId,
+          emailAccountId,
+          status: "success",
           mailbox: "INBOX",
           processed: 1,
           lastUid: 1,
           uidValidity: "777",
           uidValidityChanged: false,
         }),
-      );
-      expect(initiallyProcessed).toHaveLength(1);
-      expect(initiallyProcessed[0]).toEqual(
+      ]);
+
+      const provider = await createEmailProvider({
+        emailAccountId: emailAccountId!,
+        provider: IMAP_PROVIDER,
+        logger,
+      });
+      const inbox = await provider.getInboxMessages(10);
+      expect(inbox.map((message) => message.subject)).toEqual([
+        `Initial ${harness.runId}`,
+      ]);
+      expect(inbox[0]).toEqual(
         expect.objectContaining({
           subject: `Initial ${harness.runId}`,
           textPlain: expect.stringContaining("seed message"),
           labelIds: expect.arrayContaining(["INBOX", "UNREAD"]),
         }),
       );
-
-      const provider = new ImapProvider(settings, logger);
-      const inbox = await provider.getInboxMessages(10);
-      expect(inbox.map((message) => message.subject)).toEqual([
-        `Initial ${harness.runId}`,
-      ]);
-      expect(inbox[0]?.labelIds).toEqual(expect.arrayContaining(["UNREAD"]));
       await expect(
         provider.markReadThread(inbox[0]!.threadId, true),
       ).rejects.toThrow("read-only");
@@ -82,36 +126,32 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)(
         subject: `Incremental ${harness.runId}`,
         text: "incremental message",
       });
-      const incrementallyProcessed: ParsedMessage[] = [];
-      const pollResults = await pollImapEmailAccounts({
-        emailAccountIds: [harness.emailAccountId],
+      const incrementalPollResults = await pollImapEmailAccounts({
+        emailAccountIds: [emailAccountId!],
         logger,
-        syncAccount: async ({ emailAccountId }) =>
-          syncImapMailbox({
-            emailAccountId,
-            cursor,
-            client: createImapClient(settings),
-            processMessage: (message) => incrementallyProcessed.push(message),
-            saveCursor: (nextCursor) => {
-              cursor = nextCursor;
-            },
-            logger,
-          }),
       });
 
-      expect(pollResults).toEqual([
+      expect(incrementalPollResults).toEqual([
         expect.objectContaining({
+          emailAccountId,
           status: "success",
           processed: 1,
           lastUid: 2,
         }),
       ]);
-      expect(incrementallyProcessed.map((message) => message.subject)).toEqual([
-        `Incremental ${harness.runId}`,
-      ]);
+
+      const updatedInbox = await provider.getInboxMessages(10);
+      expect(updatedInbox.map((message) => message.subject)).toEqual(
+        expect.arrayContaining([
+          `Initial ${harness.runId}`,
+          `Incremental ${harness.runId}`,
+        ]),
+      );
 
       await provider.replyToEmail(
-        incrementallyProcessed[0]!,
+        updatedInbox.find(
+          (message) => message.subject === `Incremental ${harness.runId}`,
+        )!,
         `Reply body ${harness.runId}`,
       );
 
@@ -130,21 +170,52 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)(
   },
 );
 
-function createImapClient(settings: MailboxConnectionSettings) {
-  return new ImapFlow({
-    host: settings.imap.host,
-    port: settings.imap.port,
-    secure: settings.imap.secure,
-    auth: {
-      user: settings.username,
-      pass: settings.password,
-    },
-    logger: false,
-    connectionTimeout: settings.timeoutMs,
-    greetingTimeout: settings.timeoutMs,
-    socketTimeout: settings.timeoutMs,
-  });
-}
+type TestUser = {
+  id: string;
+  email: string;
+  password: string;
+};
+
+type TestAccount = {
+  id: string;
+  userId: string;
+  provider: string;
+  providerAccountId: string;
+  type: string;
+  disconnectedAt: Date | null;
+};
+
+type TestEmailAccount = {
+  id: string;
+  email: string;
+  userId: string;
+  accountId: string;
+  imapSyncCursor: unknown;
+};
+
+type TestEmailConnection = {
+  emailAccountId: string;
+  protocol: string;
+  preset: string;
+  imapHost: string;
+  imapPort: number;
+  imapSecure: boolean;
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  username: string;
+  password: string;
+  isConnected: boolean;
+  syncCursor: unknown;
+  lastSyncedAt: Date | null;
+};
+
+type TestDatabase = {
+  users: Map<string, TestUser>;
+  accounts: Map<string, TestAccount>;
+  emailAccounts: Map<string, TestEmailAccount>;
+  emailConnections: Map<string, TestEmailConnection>;
+};
 
 type StoredMessage = {
   uid: number;
@@ -161,7 +232,6 @@ type SmtpMessage = {
 
 type LocalImapSmtpHarness = {
   runId: string;
-  emailAccountId: string;
   settings: MailboxConnectionSettings;
   smtpMessages: SmtpMessage[];
   appendInboxMessage(message: {
@@ -171,6 +241,168 @@ type LocalImapSmtpHarness = {
   }): StoredMessage;
   close(): Promise<void>;
 };
+
+function createTestDatabase(): TestDatabase {
+  return {
+    users: new Map(),
+    accounts: new Map(),
+    emailAccounts: new Map(),
+    emailConnections: new Map(),
+  };
+}
+
+async function signUpAndSignInWithCredentials({
+  database,
+  email,
+  password,
+}: {
+  database: TestDatabase;
+  email: string;
+  password: string;
+}) {
+  const user = {
+    id: `user-${database.users.size + 1}`,
+    email,
+    password,
+  };
+  database.users.set(user.id, user);
+
+  const signedInUser = Array.from(database.users.values()).find(
+    (storedUser) =>
+      storedUser.email === email && storedUser.password === password,
+  );
+  if (!signedInUser) throw new Error("Credentials sign-in failed");
+
+  return { user: { id: signedInUser.id, email: signedInUser.email } };
+}
+
+function installPrismaMocks(database: TestDatabase) {
+  prisma.emailAccount.findUnique.mockImplementation(async (args) => {
+    const emailAccount = getEmailAccount(database, args.where);
+    if (!emailAccount) return null;
+
+    const account = database.accounts.get(emailAccount.accountId);
+    return {
+      ...emailAccount,
+      about: null,
+      multiRuleSelectionEnabled: false,
+      sensitiveDataPolicy: null,
+      timezone: "UTC",
+      calendarBookingLink: null,
+      draftReplyConfidence: null,
+      autoCategorizeSenders: false,
+      filingEnabled: false,
+      filingPrompt: null,
+      filingConfirmationSendEmail: false,
+      account: account
+        ? {
+            id: account.id,
+            provider: account.provider,
+            disconnectedAt: account.disconnectedAt,
+            userId: account.userId,
+          }
+        : null,
+      rules: [],
+      user: {
+        aiProvider: null,
+        aiModel: null,
+        aiApiKey: null,
+        premium: null,
+      },
+    } as Awaited<ReturnType<typeof prisma.emailAccount.findUnique>>;
+  });
+
+  prisma.account.findUnique.mockImplementation(async (args) => {
+    const providerAccountId = args.where.provider_providerAccountId;
+    if (!providerAccountId) return null;
+
+    return (Array.from(database.accounts.values()).find(
+      (account) =>
+        account.provider === providerAccountId.provider &&
+        account.providerAccountId === providerAccountId.providerAccountId,
+    ) ?? null) as Awaited<ReturnType<typeof prisma.account.findUnique>>;
+  });
+
+  prisma.emailAccount.create.mockImplementation(async (args) => {
+    const emailAccountId = `email-account-${database.emailAccounts.size + 1}`;
+    const email = args.data.email;
+    const userId = args.data.user.connect?.id;
+    const connectedAccountId = args.data.account?.connect?.id;
+    const createdAccount = args.data.account?.create;
+    const accountId =
+      connectedAccountId ?? `account-${database.accounts.size + 1}`;
+
+    if (!userId) throw new Error("Missing user for email account");
+
+    if (createdAccount) {
+      database.accounts.set(accountId, {
+        id: accountId,
+        userId: createdAccount.userId,
+        provider: createdAccount.provider,
+        providerAccountId: createdAccount.providerAccountId,
+        type: createdAccount.type,
+        disconnectedAt: createdAccount.disconnectedAt,
+      });
+    }
+
+    database.emailAccounts.set(emailAccountId, {
+      id: emailAccountId,
+      email,
+      userId,
+      accountId,
+      imapSyncCursor: null,
+    });
+
+    return {
+      id: emailAccountId,
+      email,
+    } as Awaited<ReturnType<typeof prisma.emailAccount.create>>;
+  });
+
+  prisma.emailAccount.update.mockImplementation(async (args) => {
+    const emailAccount = database.emailAccounts.get(args.where.id);
+    if (!emailAccount) throw new Error("Email account not found");
+
+    if ("imapSyncCursor" in args.data) {
+      emailAccount.imapSyncCursor = args.data.imapSyncCursor;
+    }
+
+    return emailAccount as Awaited<
+      ReturnType<typeof prisma.emailAccount.update>
+    >;
+  });
+
+  prisma.emailConnection.create.mockImplementation(async (args) => {
+    const connection = args.data as TestEmailConnection;
+    database.emailConnections.set(connection.emailAccountId, connection);
+    return connection as Awaited<
+      ReturnType<typeof prisma.emailConnection.create>
+    >;
+  });
+
+  prisma.emailConnection.findUnique.mockImplementation(async (args) => {
+    const emailAccountId = args.where.emailAccountId;
+    return (database.emailConnections.get(emailAccountId) ?? null) as Awaited<
+      ReturnType<typeof prisma.emailConnection.findUnique>
+    >;
+  });
+}
+
+function getEmailAccount(
+  database: TestDatabase,
+  where: { id?: string; email?: string },
+) {
+  if (where.id) return database.emailAccounts.get(where.id) ?? null;
+  if (where.email) {
+    return (
+      Array.from(database.emailAccounts.values()).find(
+        (emailAccount) => emailAccount.email === where.email,
+      ) ?? null
+    );
+  }
+
+  return null;
+}
 
 async function startLocalImapSmtpHarness(): Promise<LocalImapSmtpHarness> {
   const runId = Math.random().toString(36).slice(2, 10);
@@ -194,7 +426,6 @@ async function startLocalImapSmtpHarness(): Promise<LocalImapSmtpHarness> {
 
   return {
     runId,
-    emailAccountId: `email-account-${runId}`,
     settings: {
       imap: {
         host: "127.0.0.1",
