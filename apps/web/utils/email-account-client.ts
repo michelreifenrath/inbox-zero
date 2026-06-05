@@ -7,6 +7,7 @@ import {
   getAccessTokenFromClient as getOutlookAccessToken,
   getOutlookClientWithRefresh,
 } from "@/utils/outlook/client";
+import { SafeError } from "@/utils/error";
 import type { MailboxConnectionSettings } from "@/utils/email/imap/connection";
 import type { Logger } from "@/utils/logger";
 
@@ -100,13 +101,16 @@ export async function getImapConnectionSettingsForEmail({
       smtpSecure: true,
       username: true,
       password: true,
+      isConnected: true,
     },
   });
 
   if (!emailConnection) {
-    throw new Error(
-      `IMAP connection not found for email account: ${emailAccountId}`,
-    );
+    throw new SafeError("IMAP connection not found", 404);
+  }
+
+  if (!emailConnection.isConnected) {
+    throw new SafeError("Email account is disconnected", 403);
   }
 
   return {
@@ -160,10 +164,15 @@ async function getTokens({ emailAccountId }: { emailAccountId: string }) {
           refresh_token: true,
           expires_at: true,
           scope: true,
+          disconnectedAt: true,
         },
       },
     },
   });
+
+  if (emailAccount?.account.disconnectedAt) {
+    throw new SafeError("Email account is disconnected", 403);
+  }
 
   return {
     accessToken: emailAccount?.account.access_token,

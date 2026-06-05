@@ -20,6 +20,7 @@ import {
 import { isAdmin } from "@/utils/admin";
 import prisma from "@/utils/prisma";
 import { createEmailProvider } from "@/utils/email/provider";
+import { isImapProvider } from "@/utils/email/provider-types";
 import type { EmailProvider } from "@/utils/email/types";
 import { startRequestTimer } from "@/utils/request-timing";
 import {
@@ -470,6 +471,12 @@ async function emailProviderMiddleware(
             account: {
               select: {
                 provider: true,
+                disconnectedAt: true,
+              },
+            },
+            emailConnection: {
+              select: {
+                isConnected: true,
               },
             },
           },
@@ -483,6 +490,20 @@ async function emailProviderMiddleware(
       );
     }
 
+    if (emailAccount.account.disconnectedAt) {
+      throw new SafeError("Email account is disconnected", 403);
+    }
+
+    if (isImapProvider(emailAccount.account.provider)) {
+      if (!emailAccount.emailConnection) {
+        throw new SafeError("IMAP connection not found", 404);
+      }
+
+      if (!emailAccount.emailConnection.isConnected) {
+        throw new SafeError("Email account is disconnected", 403);
+      }
+    }
+
     const provider = await runTimedMiddlewareStep({
       logger: emailAccountReq.logger,
       step: "create-email-provider",
@@ -490,6 +511,7 @@ async function emailProviderMiddleware(
         createEmailProvider({
           emailAccountId: emailAccount.id,
           provider: emailAccount.account.provider,
+          disconnectedAt: emailAccount.account.disconnectedAt,
           logger: emailAccountReq.logger,
         }),
     });
