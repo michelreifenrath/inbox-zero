@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { SafeError } from "@/utils/error";
 import { STRATO_IMAP_PRESET } from "@/utils/email/imap-presets";
 import type { ParsedMessage } from "@/utils/types";
-import { forwardSmtpEmail, replyToSmtpEmail, sendSmtpEmail } from "./smtp";
+import {
+  forwardSmtpEmail,
+  replyToSmtpEmail,
+  sendSmtpEmail,
+  sendSmtpEmailWithHtml,
+} from "./smtp";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/env", () => ({
@@ -70,6 +75,44 @@ describe("IMAP SMTP send", () => {
       contentType: "text/plain",
     });
     expect(parsed.attachments[0].content.toString()).toBe("attachment body");
+  });
+
+  it("does not expose SMTP Message-ID as an IMAP provider message ID", async () => {
+    const result = await sendSmtpEmail(
+      settings,
+      {
+        to: "to@example.com",
+        subject: "Hello",
+        messageText: "Body",
+      },
+      createSmtpInfoClients("<SMTP-ID@Example.COM>"),
+    );
+
+    expect(result).toEqual({
+      messageId: "",
+      threadId: "smtp-id@example.com",
+    });
+  });
+
+  it("keeps an existing thread ID instead of replacing it with SMTP Message-ID", async () => {
+    const result = await sendSmtpEmailWithHtml(
+      settings,
+      {
+        replyToEmail: {
+          threadId: "existing-thread@example.com",
+          headerMessageId: "parent@example.com",
+        },
+        to: "to@example.com",
+        subject: "Re: Hello",
+        messageHtml: "<p>Body</p>",
+      },
+      createSmtpInfoClients("<SMTP-ID@Example.COM>"),
+    );
+
+    expect(result).toEqual({
+      messageId: "",
+      threadId: "existing-thread@example.com",
+    });
   });
 
   it("replies with SMTP recipients and RFC threading headers", async () => {
@@ -250,6 +293,15 @@ function createStreamClients(sent: SentInfo[]) {
         close: vi.fn(),
       };
     },
+  };
+}
+
+function createSmtpInfoClients(messageId: string) {
+  return {
+    createTransport: () => ({
+      sendMail: vi.fn(async () => ({ messageId })),
+      close: vi.fn(),
+    }),
   };
 }
 

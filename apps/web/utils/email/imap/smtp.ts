@@ -216,10 +216,10 @@ async function sendSmtpMessage(
         ...message.headers,
       },
     });
-    const messageId = getMessageId(info);
+    const smtpThreadId = getSmtpThreadId(info);
     return {
-      messageId,
-      threadId: threadId || messageId,
+      messageId: "",
+      threadId: threadId || smtpThreadId,
     };
   } catch (error) {
     throw toSafeSmtpSendError(error);
@@ -314,12 +314,18 @@ function isConnectionError(code: string | undefined) {
   );
 }
 
-function getMessageId(info: unknown) {
+function getSmtpThreadId(info: unknown) {
   if (typeof info !== "object" || info === null || !("messageId" in info)) {
     return "";
   }
 
-  return String((info as { messageId?: unknown }).messageId || "");
+  return normalizeRfcMessageId(
+    String((info as { messageId?: unknown }).messageId || ""),
+  );
+}
+
+function normalizeRfcMessageId(messageId: string) {
+  return messageId.replace(/^<|>$/g, "").trim().toLowerCase();
 }
 
 function getErrorField(error: unknown, field: string) {
