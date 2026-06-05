@@ -3,6 +3,7 @@ import {
   getImapConnectionSettingsForEmail,
   getOutlookClientForEmail,
 } from "@/utils/email-account-client";
+import { SafeError } from "@/utils/error";
 import { GmailProvider } from "@/utils/email/google";
 import { ImapProvider } from "@/utils/email/imap/provider";
 import { OutlookProvider } from "@/utils/email/microsoft";
@@ -16,11 +17,17 @@ export async function createEmailProvider({
   emailAccountId,
   provider,
   logger,
+  disconnectedAt,
 }: {
   emailAccountId: string;
   provider: string;
   logger: Logger;
+  disconnectedAt?: Date | null;
 }): Promise<EmailProvider> {
+  if (disconnectedAt) {
+    throw new SafeError("Email account is disconnected", 403);
+  }
+
   if (isImapProvider(provider)) {
     const settings = await getImapConnectionSettingsForEmail({
       emailAccountId,
@@ -29,7 +36,7 @@ export async function createEmailProvider({
   }
 
   const rateLimitProvider = toRateLimitProvider(provider);
-  if (!rateLimitProvider) throw new Error(`Unsupported provider: ${provider}`);
+  if (!rateLimitProvider) throw new SafeError("Unsupported provider", 400);
 
   await assertProviderNotRateLimited({
     emailAccountId,
