@@ -63,6 +63,8 @@ import { getEmailAccountForRuleExecution } from "@/utils/user/get";
 import type { AttachmentSourceInput } from "@/utils/attachments/source-schema";
 import { assertCanUseDigestsIfNeeded } from "@/utils/premium/server";
 
+type SetCategoryAction = Exclude<CategoryAction, "none">;
+
 export const createRuleAction = actionClient
   .metadata({ name: "createRule" })
   .inputSchema(createRuleBody)
@@ -335,6 +337,35 @@ export const createRulesOnboardingAction = actionClient
         }
       }
 
+      const isSet = (
+        value: string | undefined | null,
+      ): value is SetCategoryAction => value !== "none" && value !== undefined;
+
+      for (const [systemType, category] of systemCategoryMap) {
+        if (isSet(category.action)) {
+          const ruleConfiguration = getRuleConfig(systemType);
+          assertProviderSupportsCategoryAction({
+            provider,
+            categoryAction: category.action,
+            systemType,
+            draftReply: !!ruleConfiguration.draftReply,
+            hasDigest: false,
+          });
+        }
+      }
+
+      for (const customCategory of customCategories) {
+        if (isSet(customCategory.action)) {
+          assertProviderSupportsCategoryAction({
+            provider,
+            categoryAction: customCategory.action,
+            systemType: undefined,
+            draftReply: false,
+            hasDigest: false,
+          });
+        }
+      }
+
       const emailAccount = await getEmailAccountForRuleExecution({
         emailAccountId,
       });
@@ -342,23 +373,22 @@ export const createRulesOnboardingAction = actionClient
 
       const promises: Promise<unknown>[] = [];
 
-      const isSet = (
-        value: string | undefined | null,
-      ): value is
-        | "label"
-        | "label_archive"
-        | "label_archive_delayed"
-        | "move_folder"
-        | "move_folder_delayed" => value !== "none" && value !== undefined;
-
-      async function createSystemRuleForOnboarding(
+      function createSystemRuleForOnboarding(
         systemType: SystemType,
-        userSelectedAction?: CategoryAction,
+        userSelectedAction?: SetCategoryAction,
       ) {
         const ruleConfiguration = getRuleConfig(systemType);
         const { name, instructions, label, runOnThreads } = ruleConfiguration;
         const categoryAction =
           userSelectedAction || getCategoryAction(systemType, provider);
+
+        assertProviderSupportsCategoryAction({
+          provider,
+          categoryAction,
+          systemType,
+          draftReply: !!ruleConfiguration.draftReply,
+          hasDigest: false,
+        });
 
         const promise = (async () => {
           const actions = await getActionsFromCategoryAction({
@@ -442,6 +472,14 @@ export const createRulesOnboardingAction = actionClient
       // Create rules for custom categories
       for (const customCategory of customCategories) {
         if (customCategory.action && isSet(customCategory.action)) {
+          assertProviderSupportsCategoryAction({
+            provider,
+            categoryAction: customCategory.action,
+            systemType: undefined,
+            draftReply: false,
+            hasDigest: false,
+          });
+
           const actions = await getActionsFromCategoryAction({
             emailAccountId,
             ruleName: customCategory.name,
@@ -592,6 +630,10 @@ export const copyRulesFromAccountAction = actionClientUser
 
       await assertCanUseDigestsIfNeeded(
         userId,
+        sourceRules.flatMap((rule) => rule.actions),
+      );
+      assertProviderSupportsRuleActions(
+        targetAccount.account.provider,
         sourceRules.flatMap((rule) => rule.actions),
       );
 
@@ -901,6 +943,43 @@ function assertProviderSupportsRuleActions(
   }
 }
 
+function assertProviderSupportsCategoryAction({
+  provider,
+  categoryAction,
+  systemType,
+  draftReply,
+  hasDigest,
+}: {
+  provider: string;
+  categoryAction: SetCategoryAction;
+  systemType?: SystemType;
+  draftReply: boolean;
+  hasDigest: boolean;
+}) {
+  const { base } = normalizeCategoryAction(categoryAction);
+
+  assertProviderSupportsRuleActions(
+    provider,
+    getActionTypesForCategoryAction({
+      categoryAction: base,
+      systemType,
+      draftReply,
+      hasDigest,
+    }),
+  );
+}
+
+function normalizeCategoryAction(action: SetCategoryAction) {
+  switch (action) {
+    case "label_archive_delayed":
+      return { base: "label_archive" as const, isDelayed: true };
+    case "move_folder_delayed":
+      return { base: "move_folder" as const, isDelayed: true };
+    default:
+      return { base: action, isDelayed: false };
+  }
+}
+
 async function resolveActionLabels<
   T extends {
     type: ActionType;
@@ -984,7 +1063,7 @@ async function getActionsFromCategoryAction({
 }: {
   emailAccountId: string;
   ruleName: string;
-  categoryAction: CategoryAction;
+  categoryAction: SetCategoryAction;
   label: string;
   hasDigest: boolean;
   draftReply: boolean;
@@ -992,28 +1071,22 @@ async function getActionsFromCategoryAction({
   logger: Logger;
   systemType?: SystemType;
 }): Promise<RuleActionCreateData[]> {
+  assertProviderSupportsCategoryAction({
+    provider,
+    categoryAction,
+    systemType,
+    draftReply,
+    hasDigest,
+  });
+
   const emailProvider = await createEmailProvider({
     emailAccountId,
     provider,
     logger,
   });
 
-  function normalizeCategory(action: CategoryAction) {
-    switch (action) {
-      case "label_archive_delayed":
-        return { base: "label_archive" as const, isDelayed: true };
-      case "move_folder_delayed":
-        return { base: "move_folder" as const, isDelayed: true };
-      default:
-        return {
-          base: action as "label" | "label_archive" | "move_folder",
-          isDelayed: false,
-        };
-    }
-  }
-
   const { base: baseCategoryAction, isDelayed } =
-    normalizeCategory(categoryAction);
+    normalizeCategoryAction(categoryAction);
 
   const actionTypes = getActionTypesForCategoryAction({
     categoryAction: baseCategoryAction,
@@ -1082,13 +1155,17 @@ export const importRulesAction = actionClient
   .inputSchema(importRulesBody)
   .action(
     async ({
-      ctx: { emailAccountId, userId, logger },
+      ctx: { emailAccountId, userId, logger, provider },
       parsedInput: { rules },
     }) => {
       logger.info("Importing rules", { count: rules.length });
 
       await assertCanUseDigestsIfNeeded(
         userId,
+        rules.flatMap((rule) => rule.actions),
+      );
+      assertProviderSupportsRuleActions(
+        provider,
         rules.flatMap((rule) => rule.actions),
       );
 
