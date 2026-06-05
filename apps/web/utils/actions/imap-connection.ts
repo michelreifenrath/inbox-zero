@@ -1,5 +1,7 @@
 "use server";
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { actionClientUser } from "@/utils/actions/safe-action";
 import {
   connectImapMailboxBody,
@@ -103,6 +105,11 @@ async function connectMailbox({
     throw new SafeError("Mailbox is already connected with another provider.");
   }
 
+  if (input.preset === "custom") {
+    await assertCustomHostAllowed(input.imapHost);
+    await assertCustomHostAllowed(input.smtpHost);
+  }
+
   await verifyMailboxConnection(connectionSettings);
 
   if (existingEmailAccount) {
@@ -162,6 +169,84 @@ async function connectMailbox({
     emailAccountId: emailAccount.id,
     email: emailAccount.email,
   };
+}
+
+async function assertCustomHostAllowed(host: string) {
+  const normalizedHost = host.toLowerCase().replace(/\.$/, "");
+  const hostAddress = stripAddressBrackets(normalizedHost);
+
+  if (
+    normalizedHost === "localhost" ||
+    normalizedHost.endsWith(".localhost") ||
+    normalizedHost.endsWith(".local") ||
+    (isIP(hostAddress) === 0 && !normalizedHost.includes(".")) ||
+    isUnsafeAddress(hostAddress)
+  ) {
+    throw new SafeError("Mailbox server host is not allowed.");
+  }
+
+  let addresses: { address: string }[];
+  try {
+    addresses = await lookup(hostAddress, { all: true });
+  } catch {
+    throw new SafeError("Mailbox server host could not be resolved.");
+  }
+
+  if (
+    addresses.length === 0 ||
+    addresses.some(({ address }) => isUnsafeAddress(address))
+  ) {
+    throw new SafeError("Mailbox server host is not allowed.");
+  }
+}
+
+function isUnsafeAddress(address: string) {
+  const addressType = isIP(address);
+
+  if (addressType === 4) {
+    const [first = 0, second = 0] = address.split(".").map(Number);
+    return (
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      first >= 224 ||
+      (first === 100 && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 198 && (second === 18 || second === 19))
+    );
+  }
+
+  if (addressType === 6) {
+    const normalizedAddress = address.toLowerCase();
+    const mappedIpv4Address = normalizedAddress.match(
+      /(?:::ffff:)(\d+\.\d+\.\d+\.\d+)$/,
+    )?.[1];
+    if (mappedIpv4Address) return isUnsafeAddress(mappedIpv4Address);
+
+    const firstHextet = Number.parseInt(
+      normalizedAddress.split(":")[0] || "0",
+      16,
+    );
+    return (
+      normalizedAddress === "::" ||
+      normalizedAddress === "::1" ||
+      (firstHextet & 0xfe_00) === 0xfc_00 ||
+      (firstHextet & 0xff_c0) === 0xfe_80 ||
+      (firstHextet & 0xff_00) === 0xff_00
+    );
+  }
+
+  return false;
+}
+
+function stripAddressBrackets(host: string) {
+  if (host.startsWith("[") && host.endsWith("]")) {
+    return host.slice(1, -1);
+  }
+
+  return host;
 }
 
 function getMailboxConnectionSettings(

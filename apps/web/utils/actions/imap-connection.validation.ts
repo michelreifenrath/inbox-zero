@@ -35,6 +35,16 @@ const stratoMailboxBody = z.object({
   password: passwordSchema,
 });
 
+const stratoMailboxFormBody = stratoMailboxBody.extend({
+  username: z.string().trim().max(320, "Username is too long"),
+  imapHost: optionalHostnameSchema,
+  imapPort: z.unknown(),
+  imapSecure: z.boolean(),
+  smtpHost: optionalHostnameSchema,
+  smtpPort: z.unknown(),
+  smtpSecure: z.boolean(),
+});
+
 const customMailboxBody = z.object({
   preset: z.literal("custom"),
   email: emailSchema,
@@ -57,44 +67,10 @@ export const connectImapMailboxBody = z.discriminatedUnion("preset", [
   customMailboxBody,
 ]);
 
-export const connectImapMailboxFormBody = z
-  .object({
-    preset: z.enum(["strato", "custom"]),
-    email: emailSchema,
-    password: passwordSchema,
-    username: z.string().trim().max(320, "Username is too long"),
-    imapHost: optionalHostnameSchema,
-    imapPort: portSchema,
-    imapSecure: z.boolean(),
-    smtpHost: optionalHostnameSchema,
-    smtpPort: portSchema,
-    smtpSecure: z.boolean(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.preset === "strato") return;
-
-    if (!value.username) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Username is required",
-        path: ["username"],
-      });
-    }
-    if (!value.imapHost) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Server host is required",
-        path: ["imapHost"],
-      });
-    }
-    if (!value.smtpHost) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Server host is required",
-        path: ["smtpHost"],
-      });
-    }
-  });
+export const connectImapMailboxFormBody = z.discriminatedUnion("preset", [
+  stratoMailboxFormBody,
+  customMailboxBody,
+]);
 
 export const connectStratoMailboxBody = stratoMailboxBody.omit({
   preset: true,

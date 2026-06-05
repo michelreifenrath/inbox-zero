@@ -89,6 +89,21 @@ describe("connectImapMailboxFormBody", () => {
 
     expect(result.success).toBe(true);
   });
+
+  it("does not validate hidden custom port values for the STRATO preset", () => {
+    const result = connectImapMailboxFormBody.safeParse({
+      ...validStratoInput,
+      username: "",
+      imapHost: "",
+      imapPort: 0,
+      imapSecure: true,
+      smtpHost: "",
+      smtpPort: Number.NaN,
+      smtpSecure: true,
+    });
+
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("connectStratoMailboxBody", () => {

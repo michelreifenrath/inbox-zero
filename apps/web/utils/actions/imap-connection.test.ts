@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
 import { verifyMailboxConnection } from "@/utils/email/imap/connection";
@@ -9,6 +10,9 @@ import {
 } from "./imap-connection";
 
 vi.mock("@/utils/prisma");
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(),
+}));
 vi.mock("@/utils/email/imap/connection", () => ({
   verifyMailboxConnection: vi.fn(),
 }));
@@ -69,11 +73,13 @@ const customConnectionData = {
   lastSyncedAt: null,
 };
 
+const mockedLookup = vi.mocked(lookup);
 const mockedVerifyMailboxConnection = vi.mocked(verifyMailboxConnection);
 
 describe("connectStratoMailboxAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     mockedVerifyMailboxConnection.mockResolvedValue(undefined);
     prisma.emailAccount.findUnique.mockResolvedValue(null);
     prisma.account.findUnique.mockResolvedValue(null);
@@ -153,6 +159,47 @@ describe("connectStratoMailboxAction", () => {
       },
     });
     expect(JSON.stringify(result?.data)).not.toContain("custom-password");
+  });
+
+  it("rejects custom hosts that resolve to private addresses", async () => {
+    mockedLookup.mockResolvedValueOnce([{ address: "10.0.0.5", family: 4 }]);
+
+    const result = await connectImapMailboxAction(customInput);
+
+    expect(result?.serverError).toBe("Mailbox server host is not allowed.");
+    expect(mockedVerifyMailboxConnection).not.toHaveBeenCalled();
+    expect(prisma.emailAccount.create).not.toHaveBeenCalled();
+    expect(prisma.account.update).not.toHaveBeenCalled();
+    expect(prisma.emailConnection.create).not.toHaveBeenCalled();
+    expect(prisma.emailConnection.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects custom loopback hosts before resolving or connecting", async () => {
+    const result = await connectImapMailboxAction({
+      ...customInput,
+      imapHost: "localhost",
+    });
+
+    expect(result?.serverError).toBe("Mailbox server host is not allowed.");
+    expect(mockedLookup).not.toHaveBeenCalled();
+    expect(mockedVerifyMailboxConnection).not.toHaveBeenCalled();
+    expect(prisma.emailAccount.create).not.toHaveBeenCalled();
+    expect(prisma.account.update).not.toHaveBeenCalled();
+    expect(prisma.emailConnection.create).not.toHaveBeenCalled();
+    expect(prisma.emailConnection.upsert).not.toHaveBeenCalled();
+  });
+
+  it("does not apply custom host checks to STRATO preset connections", async () => {
+    const result = await connectStratoMailboxAction(input);
+
+    expect(result?.serverError).toBeUndefined();
+    expect(mockedLookup).not.toHaveBeenCalled();
+    expect(mockedVerifyMailboxConnection).toHaveBeenCalledWith({
+      imap: STRATO_IMAP_PRESET.imap,
+      smtp: STRATO_IMAP_PRESET.smtp,
+      username: "user@example.com",
+      password: "strato-password",
+    });
   });
 
   it("rejects a duplicate mailbox already owned by another user", async () => {
