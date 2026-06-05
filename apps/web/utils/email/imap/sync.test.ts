@@ -1,13 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import prisma from "@/utils/__mocks__/prisma";
+import { getImapConnectionSettingsForEmail } from "@/utils/email-account-client";
 import type { Logger } from "@/utils/logger";
+import { processHistoryItem } from "@/utils/webhook/process-history-item";
 import {
   pollImapEmailAccounts,
+  syncImapAccount,
   syncImapMailbox,
   type ImapMailboxSyncClient,
   type ImapSyncCursor,
 } from "./sync";
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/utils/prisma");
+vi.mock("@/utils/email-account-client", () => ({
+  getImapConnectionSettingsForEmail: vi.fn(),
+}));
+vi.mock("@/utils/webhook/process-history-item", () => ({
+  processHistoryItem: vi.fn(),
+}));
 
 describe("syncImapMailbox", () => {
   beforeEach(() => {
@@ -140,6 +151,110 @@ describe("syncImapMailbox", () => {
       },
     });
     expect(result.uidValidityChanged).toBe(true);
+  });
+});
+
+describe("syncImapAccount", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("selects AI user fields and passes them into message processing", async () => {
+    const emailAccount = {
+      id: "email-account-id",
+      userId: "user-id",
+      email: "imap@example.com",
+      about: null,
+      multiRuleSelectionEnabled: false,
+      sensitiveDataPolicy: null,
+      timezone: "UTC",
+      calendarBookingLink: null,
+      draftReplyConfidence: null,
+      autoCategorizeSenders: false,
+      filingEnabled: false,
+      filingPrompt: null,
+      filingConfirmationSendEmail: false,
+      imapSyncCursor: null,
+      account: {
+        provider: "imap",
+        disconnectedAt: null,
+      },
+      rules: [
+        {
+          id: "rule-id",
+          enabled: true,
+          actions: [],
+        },
+      ],
+      user: {
+        aiProvider: "openai",
+        aiModel: "gpt-4o-mini",
+        aiApiKey: "api-key",
+        premium: {
+          appleExpiresAt: null,
+          appleRevokedAt: null,
+          appleSubscriptionStatus: null,
+          adminGrantExpiresAt: null,
+          adminGrantTier: null,
+          lemonSqueezyRenewsAt: null,
+          stripeSubscriptionStatus: "active",
+          tier: "STARTER_MONTHLY",
+        },
+      },
+    };
+
+    vi.mocked(prisma.emailAccount.findUnique).mockResolvedValue(
+      emailAccount as any,
+    );
+    vi.mocked(getImapConnectionSettingsForEmail).mockResolvedValue({
+      imap: {
+        host: "imap.example.com",
+        port: 993,
+        secure: true,
+      },
+      smtp: {
+        host: "smtp.example.com",
+        port: 465,
+        secure: true,
+      },
+      username: "imap@example.com",
+      password: "password",
+      timeoutMs: 1000,
+    });
+
+    await syncImapAccount({
+      emailAccountId: "email-account-id",
+      logger: mockLogger(),
+      createClient: () => new MockImapClient({ uidValidity: 7, uids: [1] }),
+    });
+
+    expect(prisma.emailAccount.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          userId: true,
+          user: {
+            select: expect.objectContaining({
+              aiProvider: true,
+              aiModel: true,
+              aiApiKey: true,
+            }),
+          },
+        }),
+      }),
+    );
+    expect(processHistoryItem).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        emailAccount: expect.objectContaining({
+          userId: "user-id",
+          user: expect.objectContaining({
+            aiProvider: "openai",
+            aiModel: "gpt-4o-mini",
+            aiApiKey: "api-key",
+          }),
+        }),
+      }),
+    );
   });
 });
 

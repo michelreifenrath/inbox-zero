@@ -294,6 +294,7 @@ async function getImapEmailAccountForSync(emailAccountId: string) {
     where: { id: emailAccountId },
     select: {
       id: true,
+      userId: true,
       email: true,
       about: true,
       multiRuleSelectionEnabled: true,
@@ -320,6 +321,8 @@ async function getImapEmailAccountForSync(emailAccountId: string) {
       },
       user: {
         select: {
+          aiProvider: true,
+          aiModel: true,
           aiApiKey: true,
           premium: {
             select: premiumEntitlementSelect,
