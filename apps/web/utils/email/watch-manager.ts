@@ -11,14 +11,20 @@ import { captureException, isInvalidGrantError } from "@/utils/error";
 import { cleanupInvalidTokens } from "@/utils/auth/cleanup-invalid-tokens";
 import type { EmailProvider } from "@/utils/email/types";
 import { createManagedOutlookSubscription } from "@/utils/outlook/subscription-manager";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 import { logErrorWithDedupe } from "@/utils/log-error-with-dedupe";
+import { pollImapEmailAccounts } from "@/utils/email/imap/sync";
 
 export type WatchEmailAccountResult =
   | {
       emailAccountId: string;
       status: "success";
-      expirationDate: Date;
+      expirationDate?: Date;
+      syncType?: "imap-poll";
+      messagesProcessed?: number;
     }
   | {
       emailAccountId: string;
@@ -156,6 +162,24 @@ async function watchEmailAccount(
     }
 
     return null;
+  }
+
+  if (isImapProvider(account?.provider)) {
+    logger.info("Polling IMAP account");
+
+    const [result] = await pollImapEmailAccounts({
+      emailAccountIds: [emailAccount.id],
+      logger,
+    });
+
+    if (!result || result.status === "error") return result || null;
+
+    return {
+      emailAccountId: emailAccount.id,
+      status: "success",
+      syncType: "imap-poll",
+      messagesProcessed: result.processed,
+    };
   }
 
   if (!account?.access_token || !account?.refresh_token) {
