@@ -1,6 +1,9 @@
 import { type InferUITool, tool } from "ai";
 import type { Logger } from "@/utils/logger";
-import { createRuleSchema } from "@/utils/ai/rule/create-rule-schema";
+import {
+  createRuleSchema,
+  getUnsupportedRuleActionsError,
+} from "@/utils/ai/rule/create-rule-schema";
 import {
   createRule,
   outboundActionsNeedChatRiskConfirmation,
@@ -32,6 +35,18 @@ export const createRuleTool = ({
       trackRuleToolCall({ tool: "create_rule", email, logger });
 
       try {
+        const unsupportedActionsError = getUnsupportedRuleActionsError({
+          provider,
+          actions,
+        });
+
+        if (unsupportedActionsError) {
+          return {
+            success: false,
+            error: unsupportedActionsError,
+          };
+        }
+
         const overlapConflict = await findSenderOnlyOverlapConflict({
           emailAccountId,
           rule: {
