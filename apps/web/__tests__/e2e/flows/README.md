@@ -67,6 +67,16 @@ pnpm test-e2e:flows full-reply-cycle
 E2E_VERBOSE=true pnpm test-e2e:flows
 ```
 
+## Local IMAP/SMTP Generic Mailbox Flow
+
+The deterministic generic mailbox flow starts local IMAP and SMTP TCP servers, seeds a unique mailbox for the run, and does not require external mailbox credentials:
+
+```bash
+corepack pnpm --dir apps/web exec cross-env RUN_INTEGRATION_TESTS=true RUN_AI_TESTS=false vitest --run __tests__/integration/imap-smtp-e2e.test.ts && corepack pnpm --dir apps/web exec cross-env RUN_AI_TESTS=false vitest --run utils/email/imap/sync.test.ts utils/email/provider.test.ts utils/email/watch-manager.test.ts
+```
+
+The IMAP/SMTP test uses real protocol connections and keeps the per-run mailbox password inside the test process. The follow-up targeted tests cover the IMAP sync, provider, and watch-manager behavior that the flow depends on.
+
 ## Test Structure
 
 ```text
