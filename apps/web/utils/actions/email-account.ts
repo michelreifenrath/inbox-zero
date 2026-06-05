@@ -8,6 +8,10 @@ import { createEmailProvider } from "@/utils/email/provider";
 import { getEmailAccountWithAiAndTokens } from "@/utils/user/get";
 import { SafeError } from "@/utils/error";
 import { getEmailForLLM } from "@/utils/get-email-from-message";
+import {
+  IMAP_UNSUPPORTED_SIGNATURE_LOOKUP_MESSAGE,
+  supportsProviderSignatureLookup,
+} from "@/utils/email/provider-types";
 import { updateContactRole } from "@inboxzero/loops";
 import {
   updateHiddenAiDraftLinksBody,
@@ -133,6 +137,10 @@ export const updateHiddenAiDraftLinksAction = actionClient
 export const fetchSignaturesFromProviderAction = actionClient
   .metadata({ name: "fetchSignaturesFromProvider" })
   .action(async ({ ctx: { emailAccountId, provider, logger } }) => {
+    if (!supportsProviderSignatureLookup(provider)) {
+      throw new SafeError(IMAP_UNSUPPORTED_SIGNATURE_LOOKUP_MESSAGE);
+    }
+
     const emailProvider = await createEmailProvider({
       emailAccountId,
       provider,

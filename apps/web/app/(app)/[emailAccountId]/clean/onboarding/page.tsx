@@ -13,6 +13,7 @@ import { createEmailProvider } from "@/utils/email/provider";
 import { checkUserOwnsEmailAccount } from "@/utils/email-account";
 import prisma from "@/utils/prisma";
 import { createScopedLogger } from "@/utils/logger";
+import { isGoogleProvider } from "@/utils/email/provider-types";
 
 export default async function CleanPage(props: {
   params: Promise<{ emailAccountId: string }>;
@@ -42,6 +43,12 @@ export default async function CleanPage(props: {
 
   if (!emailAccount) {
     return <CardTitle>Email account not found</CardTitle>;
+  }
+
+  if (!isGoogleProvider(emailAccount.account.provider)) {
+    return (
+      <CardTitle>Deep Clean is only supported for Google accounts</CardTitle>
+    );
   }
 
   const emailProvider = await createEmailProvider({

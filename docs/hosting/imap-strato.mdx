@@ -1,0 +1,79 @@
+---
+title: 'IMAP and STRATO Mailboxes'
+description: 'Connect STRATO or custom IMAP/SMTP mailboxes to Inbox Zero'
+---
+
+Inbox Zero can connect STRATO and other standard IMAP/SMTP mailboxes without Google or Microsoft OAuth.
+
+<Info>
+  IMAP support is intentionally not full Gmail or Microsoft parity. Generic IMAP mailboxes are read through IMAP and sent through SMTP; provider labels, filters, bulk archive/delete, and provider-stored drafts are not available.
+</Info>
+
+## STRATO settings
+
+Use the **STRATO preset** in the Add mailbox form when available. It uses these settings:
+
+| Setting | Value |
+|---------|-------|
+| IMAP host | `imap.strato.de` |
+| IMAP port | `993` |
+| IMAP security | SSL/TLS enabled |
+| SMTP host | `smtp.strato.de` |
+| SMTP port | `465` |
+| SMTP security | SSL/TLS enabled |
+| Username | Your full mailbox email address |
+
+For custom IMAP/SMTP, enter the same values manually.
+
+## Mailbox password guidance
+
+Use the password for the STRATO mailbox itself, not your STRATO customer/control panel password unless STRATO configured them to be the same. In STRATO, mailbox passwords are managed per mailbox in the email administration area.
+
+If connection fails:
+
+1. Confirm the mailbox can sign in through STRATO Webmail.
+2. Reset or set the mailbox password in STRATO email administration.
+3. Retry the Inbox Zero connection with the full email address as the username.
+
+## Polling behavior
+
+Google and Microsoft accounts can use provider push notifications. IMAP accounts do not expose the same generic push API, so Inbox Zero polls IMAP mailboxes periodically during scheduled email watch/sync jobs.
+
+This means new IMAP messages may take longer to appear or be processed than Gmail or Microsoft messages.
+
+## IMAP limitations
+
+IMAP accounts currently support:
+
+- Reading inbox, sent mail, folders, messages, and attachments.
+- Sending, replying, and forwarding through SMTP.
+- AI features that only need to read mail or send via SMTP.
+
+IMAP accounts do not support:
+
+- Gmail labels, Microsoft categories, provider filters, or auto-created folders.
+- Bulk archive/delete and Deep Clean provider write actions.
+- Provider-stored draft creation, sending, editing, or cleanup.
+- Provider push watches; IMAP uses polling instead.
+- Loading signatures from the provider.
+
+Do not assume full Gmail label/filter parity for IMAP mailboxes.
+
+## Manual smoke checklist
+
+Use this checklist after connecting a STRATO mailbox. No CI or automated test should depend on real STRATO credentials.
+
+1. Connect a STRATO mailbox with the STRATO preset.
+2. Confirm the mailbox appears in the account switcher.
+3. Open Inbox and Sent views and confirm messages load.
+4. Send a test email to another address.
+5. Reply to an existing message and confirm the reply is delivered.
+6. Confirm unsupported controls are hidden or disabled, including bulk archive/delete, Deep Clean, provider signature loading, and AI draft cleanup.
+7. Wait for the next scheduled sync/poll and confirm new inbound mail is picked up.
+
+## Troubleshooting
+
+- **Authentication failed:** reset the mailbox password in STRATO and use the full email address as the username.
+- **Can receive but not send:** verify SMTP host `smtp.strato.de`, port `465`, and SSL/TLS are enabled.
+- **New mail is delayed:** IMAP accounts are polled periodically and are not real-time push watched.
+- **Labels or archive actions are missing:** this is expected for generic IMAP accounts.

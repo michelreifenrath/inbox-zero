@@ -20,7 +20,11 @@ import { useAccount } from "@/providers/EmailAccountProvider";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { getActionErrorMessage } from "@/utils/error";
 import { saveSignatureBody } from "@/utils/actions/user.validation";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import {
+  isGoogleProvider,
+  supportsProviderSignatureLookup,
+} from "@/utils/email/provider-types";
+import { MutedText } from "@/components/Typography";
 
 export const SignatureSectionForm = ({
   signature,
@@ -38,6 +42,7 @@ export const SignatureSectionForm = ({
 
   const { emailAccountId, provider } = useAccount();
   const isGmail = isGoogleProvider(provider);
+  const canLoadProviderSignature = supportsProviderSignatureLookup(provider);
 
   const { execute, isExecuting } = useAction(
     saveSignatureAction.bind(null, emailAccountId),
@@ -88,45 +93,52 @@ export const SignatureSectionForm = ({
               <Button type="submit" size="lg" loading={isExecuting}>
                 Save
               </Button>
-              <Button
-                type="button"
-                size="lg"
-                color="white"
-                onClick={async () => {
-                  const result = await executeFetchSignatures();
+              {canLoadProviderSignature ? (
+                <Button
+                  type="button"
+                  size="lg"
+                  color="white"
+                  onClick={async () => {
+                    const result = await executeFetchSignatures();
 
-                  if (result?.serverError) {
-                    toastError({
-                      title: `Error loading signature from ${isGmail ? "Gmail" : "Outlook"}`,
-                      description: result.serverError,
-                    });
-                    return;
-                  }
+                    if (result?.serverError) {
+                      toastError({
+                        title: `Error loading signature from ${isGmail ? "Gmail" : "Outlook"}`,
+                        description: result.serverError,
+                      });
+                      return;
+                    }
 
-                  const signatures = result?.data?.signatures || [];
-                  const defaultSig =
-                    signatures.find((sig) => sig.isDefault) || signatures[0];
+                    const signatures = result?.data?.signatures || [];
+                    const defaultSig =
+                      signatures.find((sig) => sig.isDefault) || signatures[0];
 
-                  if (defaultSig?.signature) {
-                    editorRef.current?.appendContent(defaultSig.signature);
-                    toastSuccess({
-                      title: "Signature loaded",
-                      description: isGmail
-                        ? "Loaded from Gmail"
-                        : "Extracted from recent sent emails",
-                    });
-                  } else {
-                    toastInfo({
-                      title: "No signature found",
-                      description: isGmail
-                        ? "No signature found in your Gmail account"
-                        : "No signature found in recent sent emails",
-                    });
-                  }
-                }}
-              >
-                Load from {isGmail ? "Gmail" : "Outlook"}
-              </Button>
+                    if (defaultSig?.signature) {
+                      editorRef.current?.appendContent(defaultSig.signature);
+                      toastSuccess({
+                        title: "Signature loaded",
+                        description: isGmail
+                          ? "Loaded from Gmail"
+                          : "Extracted from recent sent emails",
+                      });
+                    } else {
+                      toastInfo({
+                        title: "No signature found",
+                        description: isGmail
+                          ? "No signature found in your Gmail account"
+                          : "No signature found in recent sent emails",
+                      });
+                    }
+                  }}
+                >
+                  Load from {isGmail ? "Gmail" : "Outlook"}
+                </Button>
+              ) : (
+                <MutedText>
+                  Loading signatures from IMAP isn't supported. Paste your
+                  signature manually.
+                </MutedText>
+              )}
             </div>
           </SubmitButtonWrapper>
         </div>

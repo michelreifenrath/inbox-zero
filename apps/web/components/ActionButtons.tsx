@@ -10,7 +10,10 @@ import { LoadingMiniSpinner } from "@/components/Loading";
 import { getGmailUrl } from "@/utils/url";
 import { onTrashThread } from "@/utils/actions/client";
 import { useAccount } from "@/providers/EmailAccountProvider";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import {
+  isGoogleProvider,
+  supportsProviderWriteActions,
+} from "@/utils/email/provider-types";
 
 export function ActionButtons({
   threadId,
@@ -28,6 +31,7 @@ export function ActionButtons({
   refetch: (threadId?: string) => void;
 }) {
   const { emailAccountId, userEmail, provider } = useAccount();
+  const canWriteProviderMailbox = supportsProviderWriteActions(provider);
 
   const openInGmail = useCallback(() => {
     // open in gmail
@@ -66,21 +70,25 @@ export function ActionButtons({
           <SparklesIcon className="size-4" aria-hidden="true" />
         ),
       },
-      {
-        tooltip: "Archive",
-        onClick: onArchive,
-        icon: <ArchiveIcon className="size-4" aria-hidden="true" />,
-      },
-      // may remove later
-      {
-        tooltip: "Delete",
-        onClick: onTrash,
-        icon: isTrashing ? (
-          <LoadingMiniSpinner />
-        ) : (
-          <Trash2Icon className="size-4" aria-hidden="true" />
-        ),
-      },
+      ...(canWriteProviderMailbox
+        ? [
+            {
+              tooltip: "Archive",
+              onClick: onArchive,
+              icon: <ArchiveIcon className="size-4" aria-hidden="true" />,
+            },
+            // may remove later
+            {
+              tooltip: "Delete",
+              onClick: onTrash,
+              icon: isTrashing ? (
+                <LoadingMiniSpinner />
+              ) : (
+                <Trash2Icon className="size-4" aria-hidden="true" />
+              ),
+            },
+          ]
+        : []),
     ],
     [
       onTrash,
@@ -90,6 +98,7 @@ export function ActionButtons({
       isPlanning,
       openInGmail,
       provider,
+      canWriteProviderMailbox,
     ],
   );
 

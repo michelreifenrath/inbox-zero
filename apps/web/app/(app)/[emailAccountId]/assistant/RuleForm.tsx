@@ -137,6 +137,19 @@ export function RuleForm({
     minimumTier: "PLUS_MONTHLY",
   });
   const ruleEditorActions = getRuleEditorActions(rule.actions);
+  const existingRuleActionTypes = ruleEditorActions.map(
+    (action) => action.type,
+  );
+  const availableRuleActionTypes = new Set([
+    ...getAvailableActionsForRuleEditor({
+      provider,
+      existingActionTypes: existingRuleActionTypes,
+    }),
+    ...getExtraAvailableActionsForRuleEditor(existingRuleActionTypes),
+  ]);
+  const defaultRuleActionType =
+    getAvailableActionsForRuleEditor({ provider })[0] ??
+    ActionType.CALL_WEBHOOK;
 
   const form = useForm<CreateRuleBody>({
     resolver: zodResolver(createRuleBody),
@@ -161,6 +174,9 @@ export function RuleForm({
                   )
                   .map((action) => ({
                     ...action,
+                    type: availableRuleActionTypes.has(action.type)
+                      ? action.type
+                      : defaultRuleActionType,
                     delayInMinutes: action.delayInMinutes,
                     content: {
                       ...action.content,
@@ -952,10 +968,14 @@ export function getRuleActionTypeOptions({
   const extraActions = new Set(getExtraAvailableActionsForRuleEditor());
 
   return [
-    {
-      label: labelActionText,
-      value: ActionType.LABEL,
-    },
+    ...(availableActions.has(ActionType.LABEL)
+      ? [
+          {
+            label: labelActionText,
+            value: ActionType.LABEL,
+          },
+        ]
+      : []),
     ...(availableActions.has(ActionType.MOVE_FOLDER)
       ? [
           {
@@ -972,18 +992,30 @@ export function getRuleActionTypeOptions({
           },
         ]
       : []),
-    {
-      label: "Archive",
-      value: ActionType.ARCHIVE,
-    },
-    {
-      label: "Mark read",
-      value: ActionType.MARK_READ,
-    },
-    {
-      label: "Star",
-      value: ActionType.STAR,
-    },
+    ...(availableActions.has(ActionType.ARCHIVE)
+      ? [
+          {
+            label: "Archive",
+            value: ActionType.ARCHIVE,
+          },
+        ]
+      : []),
+    ...(availableActions.has(ActionType.MARK_READ)
+      ? [
+          {
+            label: "Mark read",
+            value: ActionType.MARK_READ,
+          },
+        ]
+      : []),
+    ...(availableActions.has(ActionType.STAR)
+      ? [
+          {
+            label: "Star",
+            value: ActionType.STAR,
+          },
+        ]
+      : []),
     ...(availableActions.has(ActionType.REPLY)
       ? [
           {
@@ -1008,10 +1040,14 @@ export function getRuleActionTypeOptions({
           },
         ]
       : []),
-    {
-      label: "Mark spam",
-      value: ActionType.MARK_SPAM,
-    },
+    ...(availableActions.has(ActionType.MARK_SPAM)
+      ? [
+          {
+            label: "Mark spam",
+            value: ActionType.MARK_SPAM,
+          },
+        ]
+      : []),
     ...(extraActions.has(ActionType.CALL_WEBHOOK)
       ? [
           {

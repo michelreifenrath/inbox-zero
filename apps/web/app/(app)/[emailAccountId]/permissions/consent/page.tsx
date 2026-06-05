@@ -10,11 +10,13 @@ import { toastError } from "@/components/Toast";
 import { getAccountLinkingUrl } from "@/utils/account-linking";
 import { BRAND_NAME } from "@/utils/branding";
 import { redirectToSafeUrl } from "@/utils/redirect";
+import { isImapProvider } from "@/utils/email/provider-types";
 
 export default function PermissionsConsentPage() {
   const { provider, isLoading: accountLoading } = useAccount();
   const [isReconnecting, setIsReconnecting] = useState(false);
   const isMicrosoft = provider === "microsoft";
+  const isImap = isImapProvider(provider);
 
   const handleReconnect = async () => {
     setIsReconnecting(true);
@@ -36,13 +38,17 @@ export default function PermissionsConsentPage() {
   return (
     <div className="flex flex-col items-center justify-center sm:p-20 md:p-32">
       <PageHeading className="text-center">
-        We are missing permissions 😔
+        {isImap
+          ? "No OAuth permissions needed"
+          : "We are missing permissions 😔"}
       </PageHeading>
 
       <TypographyP className="mx-auto mt-4 max-w-prose text-center">
-        {isMicrosoft
-          ? `Your Microsoft account is connected, but ${BRAND_NAME} is missing one or more required Microsoft 365 permissions.`
-          : `You must sign in and give access to all permissions for ${BRAND_NAME} to work.`}
+        {isImap
+          ? "Your IMAP account uses mailbox credentials instead of Google or Microsoft OAuth permissions."
+          : isMicrosoft
+            ? `Your Microsoft account is connected, but ${BRAND_NAME} is missing one or more required Microsoft 365 permissions.`
+            : `You must sign in and give access to all permissions for ${BRAND_NAME} to work.`}
       </TypographyP>
 
       {isMicrosoft && (
@@ -51,20 +57,26 @@ export default function PermissionsConsentPage() {
           admin to approve {BRAND_NAME} and then reconnect your account.
         </TypographyP>
       )}
-      {!isMicrosoft && (
+      {!isMicrosoft && !isImap && (
         <TypographyP className="mx-auto mt-3 max-w-prose text-center text-muted-foreground">
           Reconnect your account and approve every requested permission.
         </TypographyP>
       )}
 
-      <Button
-        className="mt-4"
-        onClick={handleReconnect}
-        loading={isReconnecting}
-        disabled={isReconnecting || accountLoading}
-      >
-        Reconnect account
-      </Button>
+      {isImap ? (
+        <Button className="mt-4" asChild>
+          <Link href="/settings">Back to settings</Link>
+        </Button>
+      ) : (
+        <Button
+          className="mt-4"
+          onClick={handleReconnect}
+          loading={isReconnecting}
+          disabled={isReconnecting || accountLoading}
+        >
+          Reconnect account
+        </Button>
+      )}
 
       <p className="mt-8 text-center text-muted-foreground">
         Having trouble?{" "}

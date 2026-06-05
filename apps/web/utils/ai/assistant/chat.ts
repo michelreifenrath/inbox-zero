@@ -9,7 +9,7 @@ import type { EmailAccountWithAI } from "@/utils/llms/types";
 import { toolCallAgentStream } from "@/utils/llms";
 import { isConversationStatusType } from "@/utils/reply-tracker/conversation-status-config";
 import prisma from "@/utils/prisma";
-import type { SystemType } from "@/generated/prisma/enums";
+import { ActionType, type SystemType } from "@/generated/prisma/enums";
 import { addToKnowledgeBaseTool } from "./tools/rules/add-to-knowledge-base-tool";
 import { createRuleTool } from "./tools/rules/create-rule-tool";
 import { getLearnedPatternsTool } from "./tools/rules/get-learned-patterns-tool";
@@ -48,6 +48,10 @@ import {
 } from "./chat-rule-state";
 import { getAssistantChatProvider } from "./chat-provider-shared";
 import { LlmUseCase } from "@/utils/llms/use-cases";
+import {
+  getAvailableActionsForRuleEditor,
+  getExtraAvailableActionsForRuleEditor,
+} from "@/utils/ai/rule/action-availability";
 
 export const maxDuration = 120;
 const ASSISTANT_CHAT_MAX_STEPS = 25;
@@ -102,9 +106,13 @@ export async function aiProcessAssistantChat({
   }
 
   const emailSendToolsEnabled = env.NEXT_PUBLIC_EMAIL_SEND_ENABLED;
-  const draftReplyActionsEnabled = !env.NEXT_PUBLIC_AUTO_DRAFT_DISABLED;
-  const webhookActionsEnabled =
-    env.NEXT_PUBLIC_WEBHOOK_ACTION_ENABLED !== false;
+  const availableRuleActions = getAvailableRuleActions(user.account.provider);
+  const draftReplyActionsEnabled = availableRuleActions.includes(
+    ActionType.DRAFT_EMAIL,
+  );
+  const webhookActionsEnabled = availableRuleActions.includes(
+    ActionType.CALL_WEBHOOK,
+  );
   let ruleReadState: RuleReadState | null = null;
   const memoryConversationMessages = conversationMessagesForMemory ?? messages;
   const userTimezone = user.timezone || "UTC";
@@ -114,6 +122,7 @@ export async function aiProcessAssistantChat({
     draftReplyActionsEnabled,
     webhookActionsEnabled,
     provider: user.account.provider,
+    availableRuleActions,
     responseSurface,
     messagingPlatform,
     userTimezone,
@@ -564,6 +573,13 @@ async function getExpectedFixContextSystemType({
   return expectedRule?.systemType ?? null;
 }
 
+function getAvailableRuleActions(provider: string) {
+  return [
+    ...getAvailableActionsForRuleEditor({ provider }),
+    ...getExtraAvailableActionsForRuleEditor(),
+  ];
+}
+
 function getEmailCapabilitiesPolicy({
   responseSurface,
   messagingPlatform,
@@ -634,6 +650,7 @@ export function buildResolvedSystemPrompt({
   draftReplyActionsEnabled,
   webhookActionsEnabled,
   provider,
+  availableRuleActions,
   responseSurface,
   messagingPlatform,
   userTimezone,
@@ -643,6 +660,7 @@ export function buildResolvedSystemPrompt({
   draftReplyActionsEnabled: boolean;
   webhookActionsEnabled: boolean;
   provider: string;
+  availableRuleActions: ActionType[];
   responseSurface: "web" | "messaging";
   messagingPlatform?: MessagingPlatform;
   userTimezone: string;
@@ -704,6 +722,8 @@ export function buildResolvedSystemPrompt({
 - If a rule write reports stale rule state, refresh with getUserRulesAndSettings and retry from that latest state.`,
     `Provider context:
 - Current provider: ${provider}.
+- Supported rule actions for this account: ${availableRuleActions.join(", ")}.
+- Do not create or update rules with actions outside this list; unsupported rule action tool calls will be rejected.
 - User timezone: ${userTimezone}. Current timestamp: ${currentTimestamp}. Resolve relative dates like today, tomorrow, this afternoon, Monday, or Friday from this timezone before calling calendar or inbox date-range tools.`,
     providerPolicy.searchSyntaxPolicy,
     `Search strategy:

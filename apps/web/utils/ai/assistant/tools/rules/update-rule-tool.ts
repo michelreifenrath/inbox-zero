@@ -6,6 +6,7 @@ import prisma from "@/utils/prisma";
 import { filterNullProperties } from "@/utils";
 import {
   createRuleActionSchema,
+  getUnsupportedRuleActionsError,
   type RuleAction,
 } from "@/utils/ai/rule/create-rule-schema";
 import { isDuplicateError } from "@/utils/prisma-helpers";
@@ -89,6 +90,20 @@ export const updateRuleTool = ({
             success: false,
             error: readValidationError,
           });
+        }
+
+        const unsupportedActionsError = updates.actions
+          ? getUnsupportedRuleActionsError({
+              provider,
+              actions: updates.actions,
+            })
+          : null;
+
+        if (unsupportedActionsError) {
+          return {
+            success: false,
+            error: unsupportedActionsError,
+          };
         }
 
         const rule = await prisma.rule.findUnique({

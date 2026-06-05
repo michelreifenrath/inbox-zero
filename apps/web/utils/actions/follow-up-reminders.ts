@@ -11,32 +11,46 @@ import prisma from "@/utils/prisma";
 import { processAccountFollowUps } from "@/app/api/follow-up-reminders/process";
 import { SafeError } from "@/utils/error";
 import { env } from "@/env";
+import {
+  IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE,
+  supportsProviderWriteActions,
+} from "@/utils/email/provider-types";
 
 export const toggleFollowUpRemindersAction = actionClient
   .metadata({ name: "toggleFollowUpReminders" })
   .inputSchema(toggleFollowUpRemindersBody)
-  .action(async ({ ctx: { emailAccountId }, parsedInput: { enabled } }) => {
-    await prisma.emailAccount.update({
-      where: { id: emailAccountId },
-      data: {
-        followUpAwaitingReplyDays: enabled ? DEFAULT_FOLLOW_UP_DAYS : null,
-        followUpNeedsReplyDays: enabled ? DEFAULT_FOLLOW_UP_DAYS : null,
-      },
-    });
-  });
+  .action(
+    async ({ ctx: { emailAccountId, provider }, parsedInput: { enabled } }) => {
+      if (enabled && !supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
+      await prisma.emailAccount.update({
+        where: { id: emailAccountId },
+        data: {
+          followUpAwaitingReplyDays: enabled ? DEFAULT_FOLLOW_UP_DAYS : null,
+          followUpNeedsReplyDays: enabled ? DEFAULT_FOLLOW_UP_DAYS : null,
+        },
+      });
+    },
+  );
 
 export const updateFollowUpSettingsAction = actionClient
   .metadata({ name: "updateFollowUpSettings" })
   .inputSchema(saveFollowUpSettingsBody)
   .action(
     async ({
-      ctx: { emailAccountId },
+      ctx: { emailAccountId, provider },
       parsedInput: {
         followUpAwaitingReplyDays,
         followUpNeedsReplyDays,
         followUpAutoDraftEnabled,
       },
     }) => {
+      if (!supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       await prisma.emailAccount.update({
         where: { id: emailAccountId },
         data: {
@@ -53,7 +67,11 @@ export const updateFollowUpSettingsAction = actionClient
 export const scanFollowUpRemindersAction = actionClient
   .metadata({ name: "scanFollowUpReminders" })
   .inputSchema(z.object({}))
-  .action(async ({ ctx: { emailAccountId, logger } }) => {
+  .action(async ({ ctx: { emailAccountId, provider, logger } }) => {
+    if (!supportsProviderWriteActions(provider)) {
+      throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+    }
+
     const emailAccount = await prisma.emailAccount.findUnique({
       where: { id: emailAccountId },
       select: {

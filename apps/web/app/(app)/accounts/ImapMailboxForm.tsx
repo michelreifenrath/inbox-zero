@@ -130,7 +130,8 @@ export function ImapMailboxForm({
           <span>
             <span className="font-medium">STRATO preset</span>
             <span className="block text-muted-foreground">
-              Uses STRATO's IMAP and SMTP servers automatically.
+              Uses STRATO's IMAP and SMTP servers automatically. Enter the
+              mailbox password from STRATO, not your control panel login.
             </span>
           </span>
         </label>
@@ -229,6 +230,12 @@ export function ImapMailboxForm({
           </label>
         </div>
       ) : null}
+
+      <p className="text-xs text-muted-foreground">
+        IMAP mailboxes are polled periodically and support reading plus SMTP
+        send/reply/forward. Provider labels, filters, bulk archive, and
+        provider-stored draft cleanup are not available.
+      </p>
 
       <Button type="submit" loading={isExecuting} className="w-full">
         Connect mailbox

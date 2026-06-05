@@ -28,11 +28,14 @@ import {
   MAX_AI_DRAFT_CLEANUP_DAYS,
   MIN_AI_DRAFT_CLEANUP_DAYS,
 } from "@/utils/ai/draft-cleanup-settings";
+import { supportsProviderStoredDrafts } from "@/utils/email/provider-types";
 
 export function CleanupDraftsSection({
   emailAccountId,
+  provider,
 }: {
   emailAccountId: string;
+  provider: string;
 }) {
   const { data, isLoading, error, mutate } =
     useSWR<GetDraftCleanupSettingsResponse>(
@@ -40,6 +43,7 @@ export function CleanupDraftsSection({
         ? ["/api/user/draft-cleanup-settings", emailAccountId]
         : null,
     );
+  const canCleanupProviderDrafts = supportsProviderStoredDrafts(provider);
   const [cleanupDaysInput, setCleanupDaysInput] = useState<string | null>(null);
   const [result, setResult] = useState<{
     deleted: number;
@@ -122,80 +126,97 @@ export function CleanupDraftsSection({
       {data && (
         <>
           <ItemSeparator />
-          <Item size="sm">
-            <ItemContent>
-              <ItemTitle>Auto-delete AI Drafts</ItemTitle>
-              <ItemDescription>
-                {`Only removes drafts created by ${BRAND_NAME} that have not been edited by you.`}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions className="flex-wrap justify-end">
-              {automaticCleanupEnabled ? (
-                <>
-                  <Input
-                    aria-label="Draft cleanup age in days"
-                    className="h-8 w-24"
+          {!canCleanupProviderDrafts ? (
+            <Item size="sm">
+              <ItemContent>
+                <ItemTitle>AI draft cleanup unavailable</ItemTitle>
+                <ItemDescription>
+                  IMAP accounts don't expose provider-stored drafts, so Inbox
+                  Zero can't find or delete old AI drafts for this mailbox.
+                </ItemDescription>
+              </ItemContent>
+            </Item>
+          ) : (
+            <>
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Auto-delete AI Drafts</ItemTitle>
+                  <ItemDescription>
+                    {`Only removes drafts created by ${BRAND_NAME} that have not been edited by you.`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions className="flex-wrap justify-end">
+                  {automaticCleanupEnabled ? (
+                    <>
+                      <Input
+                        aria-label="Draft cleanup age in days"
+                        className="h-8 w-24"
+                        disabled={isUpdatingCleanupSettings}
+                        max={MAX_AI_DRAFT_CLEANUP_DAYS}
+                        min={MIN_AI_DRAFT_CLEANUP_DAYS}
+                        onChange={(event) =>
+                          setCleanupDaysInput(event.target.value)
+                        }
+                        step={1}
+                        type="number"
+                        value={cleanupDaysInputValue}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        days
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          !cleanupDaysIsValid ||
+                          parsedCleanupDays === savedCleanupDays ||
+                          isUpdatingCleanupSettings
+                        }
+                        loading={isUpdatingCleanupSettings}
+                        onClick={handleSaveCleanupDays}
+                      >
+                        Save
+                      </Button>
+                    </>
+                  ) : null}
+                  <Switch
+                    aria-label="Toggle automatic AI draft cleanup"
+                    checked={automaticCleanupEnabled}
                     disabled={isUpdatingCleanupSettings}
-                    max={MAX_AI_DRAFT_CLEANUP_DAYS}
-                    min={MIN_AI_DRAFT_CLEANUP_DAYS}
-                    onChange={(event) =>
-                      setCleanupDaysInput(event.target.value)
-                    }
-                    step={1}
-                    type="number"
-                    value={cleanupDaysInputValue}
+                    onCheckedChange={handleToggleAutomaticCleanup}
                   />
-                  <span className="text-sm text-muted-foreground">days</span>
+                </ItemActions>
+              </Item>
+              <ItemSeparator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Delete Old AI Drafts</ItemTitle>
+                  <ItemDescription>
+                    {`Remove unedited drafts created by ${BRAND_NAME} that are older than ${savedCleanupDays} days.`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={
-                      !cleanupDaysIsValid ||
-                      parsedCleanupDays === savedCleanupDays ||
-                      isUpdatingCleanupSettings
-                    }
-                    loading={isUpdatingCleanupSettings}
-                    onClick={handleSaveCleanupDays}
+                    loading={isExecuting}
+                    onClick={() => execute()}
                   >
-                    Save
+                    Delete old drafts
                   </Button>
-                </>
-              ) : null}
-              <Switch
-                aria-label="Toggle automatic AI draft cleanup"
-                checked={automaticCleanupEnabled}
-                disabled={isUpdatingCleanupSettings}
-                onCheckedChange={handleToggleAutomaticCleanup}
-              />
-            </ItemActions>
-          </Item>
-          <ItemSeparator />
-          <Item size="sm">
-            <ItemContent>
-              <ItemTitle>Delete Old AI Drafts</ItemTitle>
-              <ItemDescription>
-                {`Remove unedited drafts created by ${BRAND_NAME} that are older than ${savedCleanupDays} days.`}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Button
-                size="sm"
-                variant="outline"
-                loading={isExecuting}
-                onClick={() => execute()}
-              >
-                Delete old drafts
-              </Button>
-            </ItemActions>
-          </Item>
-          {result && result.deleted > 0 && result.skippedModified > 0 && (
-            <div className="px-4 pb-2">
-              <p className="text-xs text-muted-foreground">
-                {result.skippedModified} draft
-                {result.skippedModified === 1 ? " was" : "s were"} kept because
-                you edited {result.skippedModified === 1 ? "it" : "them"}
-              </p>
-            </div>
+                </ItemActions>
+              </Item>
+              {result && result.deleted > 0 && result.skippedModified > 0 && (
+                <div className="px-4 pb-2">
+                  <p className="text-xs text-muted-foreground">
+                    {result.skippedModified} draft
+                    {result.skippedModified === 1 ? " was" : "s were"} kept
+                    because you edited
+                    {result.skippedModified === 1 ? " it" : " them"}
+                  </p>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

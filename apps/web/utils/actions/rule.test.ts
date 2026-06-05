@@ -32,8 +32,11 @@ vi.mock("@/utils/auth", () => ({
 import prisma from "@/utils/__mocks__/prisma";
 import { createEmailProvider } from "@/utils/email/provider";
 import {
+  copyRulesFromAccountAction,
+  createRulesOnboardingAction,
   deleteRuleAction,
   enableDraftRepliesAction,
+  importRulesAction,
   updateRuleAction,
 } from "@/utils/actions/rule";
 
@@ -224,5 +227,186 @@ describe("updateRuleAction", () => {
         },
       }),
     );
+  });
+
+  it("rejects IMAP provider-write actions before creating a provider", async () => {
+    (
+      prisma.emailAccount.findUnique as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      email: "owner@example.com",
+      account: { userId: "u1", provider: "imap" },
+    });
+
+    const result = await updateRuleAction(
+      "account-1" as never,
+      {
+        id: "rule-1",
+        name: "Updated rule",
+        instructions: null,
+        groupId: null,
+        runOnThreads: true,
+        digest: false,
+        actions: [
+          {
+            type: ActionType.ARCHIVE,
+            messagingChannelId: null,
+            labelId: null,
+            subject: null,
+            content: null,
+            to: null,
+            cc: null,
+            bcc: null,
+            url: null,
+            folderName: null,
+            folderId: null,
+            delayInMinutes: null,
+          },
+        ],
+        conditions: [
+          {
+            type: ConditionType.STATIC,
+            instructions: null,
+            to: null,
+            from: "sender@example.com",
+            subject: null,
+            body: null,
+          },
+        ],
+        conditionalOperator: "AND",
+        systemType: null,
+      } as never,
+    );
+
+    expect(result?.serverError).toContain("isn't supported for IMAP accounts");
+    expect(createEmailProviderMock).not.toHaveBeenCalled();
+    expect(prisma.rule.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("createRulesOnboardingAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects IMAP onboarding category write actions before changing rules", async () => {
+    (
+      prisma.emailAccount.findUnique as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      email: "owner@example.com",
+      account: { userId: "u1", provider: "imap" },
+    });
+
+    const result = await createRulesOnboardingAction(
+      "account-1" as never,
+      [
+        {
+          name: SystemType.NEWSLETTER,
+          description: "",
+          key: SystemType.NEWSLETTER,
+          action: "label",
+        },
+      ] as never,
+    );
+
+    expect(result?.serverError).toContain("isn't supported for IMAP accounts");
+    expect(createEmailProviderMock).not.toHaveBeenCalled();
+    expect(prisma.rule.create).not.toHaveBeenCalled();
+    expect(prisma.rule.update).not.toHaveBeenCalled();
+    expect(prisma.rule.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("copyRulesFromAccountAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects copied write actions for IMAP targets before changing rules", async () => {
+    prisma.emailAccount.findUnique
+      .mockResolvedValueOnce({
+        id: "source-account",
+        email: "source@example.com",
+        account: { userId: "u1", provider: "google" },
+      } as never)
+      .mockResolvedValueOnce({
+        id: "target-account",
+        email: "target@example.com",
+        account: { userId: "u1", provider: "imap" },
+      } as never);
+    prisma.rule.findMany.mockResolvedValueOnce([
+      {
+        id: "rule-1",
+        actions: [{ type: ActionType.LABEL }],
+      },
+    ] as never);
+
+    const result = await copyRulesFromAccountAction({
+      sourceEmailAccountId: "source-account",
+      targetEmailAccountId: "target-account",
+      ruleIds: ["rule-1"],
+    } as never);
+
+    expect(result?.serverError).toContain("isn't supported for IMAP accounts");
+    expect(prisma.rule.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.rule.create).not.toHaveBeenCalled();
+    expect(prisma.rule.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("importRulesAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects imported write actions for IMAP accounts before changing rules", async () => {
+    (
+      prisma.emailAccount.findUnique as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      email: "owner@example.com",
+      account: { userId: "u1", provider: "imap" },
+    });
+
+    const result = await importRulesAction(
+      "account-1" as never,
+      {
+        rules: [
+          {
+            name: "Imported label rule",
+            instructions: "Label matching mail",
+            enabled: true,
+            automate: true,
+            runOnThreads: false,
+            conditionalOperator: "AND",
+            categoryFilterType: null,
+            systemType: null,
+            from: null,
+            to: null,
+            subject: null,
+            body: null,
+            actions: [
+              {
+                type: ActionType.LABEL,
+                label: "Imported",
+                labelId: null,
+                subject: null,
+                content: null,
+                to: null,
+                cc: null,
+                bcc: null,
+                folderName: null,
+                folderId: null,
+                url: null,
+                delayInMinutes: null,
+              },
+            ],
+          },
+        ],
+      } as never,
+    );
+
+    expect(result?.serverError).toContain("isn't supported for IMAP accounts");
+    expect(prisma.rule.findMany).not.toHaveBeenCalled();
+    expect(prisma.rule.create).not.toHaveBeenCalled();
+    expect(prisma.rule.update).not.toHaveBeenCalled();
   });
 });

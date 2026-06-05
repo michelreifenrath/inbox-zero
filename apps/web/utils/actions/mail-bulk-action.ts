@@ -3,6 +3,11 @@
 import { actionClient } from "@/utils/actions/safe-action";
 import { bulkSenderActionSchema } from "@/utils/actions/mail-bulk-action.validation";
 import { createEmailProvider } from "@/utils/email/provider";
+import {
+  IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE,
+  supportsBulkSenderActions,
+} from "@/utils/email/provider-types";
+import { SafeError } from "@/utils/error";
 
 export const bulkArchiveAction = actionClient
   .metadata({ name: "bulkArchive" })
@@ -12,6 +17,10 @@ export const bulkArchiveAction = actionClient
       ctx: { emailAccountId, provider, emailAccount, logger },
       parsedInput: { froms },
     }) => {
+      if (!supportsBulkSenderActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,
@@ -34,6 +43,10 @@ export const bulkTrashAction = actionClient
       ctx: { emailAccountId, provider, emailAccount, logger },
       parsedInput: { froms },
     }) => {
+      if (!supportsBulkSenderActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,

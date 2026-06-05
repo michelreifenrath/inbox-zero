@@ -27,7 +27,10 @@ import { prefixPath } from "@/utils/path";
 import { useSetupProgress } from "@/hooks/useSetupProgress";
 import { LoadingContent } from "@/components/LoadingContent";
 import { EXTENSION_URL } from "@/utils/config";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import {
+  isGoogleProvider,
+  supportsBulkSenderActions,
+} from "@/utils/email/provider-types";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import {
   STEP_KEYS,
@@ -83,7 +86,7 @@ function FeatureCard({
   );
 }
 
-function getFeatures() {
+function getFeatures(provider: string) {
   const features = [
     {
       href: "/assistant",
@@ -98,18 +101,23 @@ function getFeatures() {
       description:
         "Your personal email assistant that organizes, archives, and drafts replies",
     },
-    {
-      href: "/bulk-unsubscribe",
-      icon: ArchiveIcon,
-      title: "Bulk Unsubscribe",
-      description: "Easily unsubscribe from unwanted newsletters in one click",
-    },
-    {
-      href: "/bulk-archive",
-      icon: InboxIcon,
-      title: "Bulk Archive",
-      description: "Quickly clean up your inbox by archiving old emails",
-    },
+    ...(supportsBulkSenderActions(provider)
+      ? [
+          {
+            href: "/bulk-unsubscribe",
+            icon: ArchiveIcon,
+            title: "Bulk Unsubscribe",
+            description:
+              "Easily unsubscribe from unwanted newsletters in one click",
+          },
+          {
+            href: "/bulk-archive",
+            icon: InboxIcon,
+            title: "Bulk Archive",
+            description: "Quickly clean up your inbox by archiving old emails",
+          },
+        ]
+      : []),
   ] as const;
 
   return features;
@@ -117,13 +125,14 @@ function getFeatures() {
 
 function FeatureGrid({
   emailAccountId,
+  provider,
 }: {
   emailAccountId: string;
   provider: string;
 }) {
   return (
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-4">
-      {getFeatures().map((feature) => (
+      {getFeatures(provider).map((feature) => (
         <FeatureCard
           key={feature.href}
           emailAccountId={emailAccountId}

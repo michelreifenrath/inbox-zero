@@ -88,16 +88,30 @@ export const createRuleActionSchema = (
   ]);
   const optionalFieldsSchema = createOptionalActionFieldsSchema(provider);
 
-  const actionSchemas: [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]] = [
-    createActionObjectSchema(ActionType.ARCHIVE, optionalFieldsSchema),
-    createActionObjectSchema(
-      ActionType.LABEL,
-      createRequiredLabelFieldsSchema(provider),
-    ),
-    createActionObjectSchema(ActionType.MARK_READ, optionalFieldsSchema),
-    createActionObjectSchema(ActionType.STAR, optionalFieldsSchema),
-    createActionObjectSchema(ActionType.MARK_SPAM, optionalFieldsSchema),
-    createActionObjectSchema(ActionType.DIGEST, optionalFieldsSchema),
+  const actionSchemas = [
+    ...(allowedActionTypes.has(ActionType.ARCHIVE)
+      ? [createActionObjectSchema(ActionType.ARCHIVE, optionalFieldsSchema)]
+      : []),
+    ...(allowedActionTypes.has(ActionType.LABEL)
+      ? [
+          createActionObjectSchema(
+            ActionType.LABEL,
+            createRequiredLabelFieldsSchema(provider),
+          ),
+        ]
+      : []),
+    ...(allowedActionTypes.has(ActionType.MARK_READ)
+      ? [createActionObjectSchema(ActionType.MARK_READ, optionalFieldsSchema)]
+      : []),
+    ...(allowedActionTypes.has(ActionType.STAR)
+      ? [createActionObjectSchema(ActionType.STAR, optionalFieldsSchema)]
+      : []),
+    ...(allowedActionTypes.has(ActionType.MARK_SPAM)
+      ? [createActionObjectSchema(ActionType.MARK_SPAM, optionalFieldsSchema)]
+      : []),
+    ...(allowedActionTypes.has(ActionType.DIGEST)
+      ? [createActionObjectSchema(ActionType.DIGEST, optionalFieldsSchema)]
+      : []),
     ...(allowedActionTypes.has(ActionType.DRAFT_EMAIL)
       ? [createActionObjectSchema(ActionType.DRAFT_EMAIL, optionalFieldsSchema)]
       : []),
@@ -138,7 +152,17 @@ export const createRuleActionSchema = (
       : []),
   ];
 
-  return z.union(actionSchemas) as z.ZodType<RuleAction>;
+  if (actionSchemas.length === 0) {
+    throw new Error(`No rule actions are available for provider ${provider}.`);
+  }
+
+  if (actionSchemas.length === 1) {
+    return actionSchemas[0] as z.ZodType<RuleAction>;
+  }
+
+  return z.union(
+    actionSchemas as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]],
+  ) as z.ZodType<RuleAction>;
 };
 
 export const createRuleSchema = (provider: string) =>
@@ -153,6 +177,44 @@ export const createRuleSchema = (provider: string) =>
       .array(createRuleActionSchema(provider))
       .describe("The actions to take"),
   });
+
+export function getUnsupportedRuleActionTypes({
+  provider,
+  actions,
+}: {
+  provider: string;
+  actions: { type: ActionType }[];
+}) {
+  const allowedActionTypes = new Set([
+    ...getAvailableActionsForRuleEditor({ provider }),
+    ...getExtraAvailableActionsForRuleEditor(),
+  ]);
+
+  return Array.from(
+    new Set(
+      actions
+        .map((action) => action.type)
+        .filter((actionType) => !allowedActionTypes.has(actionType)),
+    ),
+  );
+}
+
+export function getUnsupportedRuleActionsError({
+  provider,
+  actions,
+}: {
+  provider: string;
+  actions: { type: ActionType }[];
+}) {
+  const unsupportedActionTypes = getUnsupportedRuleActionTypes({
+    provider,
+    actions,
+  });
+
+  if (!unsupportedActionTypes.length) return null;
+
+  return `No rule was changed. These actions are not supported for ${provider} accounts: ${unsupportedActionTypes.join(", ")}.`;
+}
 
 export type CreateRuleSchema = z.infer<ReturnType<typeof createRuleSchema>>;
 export type CreateOrUpdateRuleSchema = CreateRuleSchema & {

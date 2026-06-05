@@ -67,6 +67,18 @@ describe("getAvailableActionsForRuleEditor", () => {
     expect(actions).toContain(ActionType.DRAFT_EMAIL);
     expect(actions).not.toContain(ActionType.DRAFT_MESSAGING_CHANNEL);
   });
+
+  it("keeps IMAP rules to SMTP send actions", () => {
+    const actions = getAvailableActionsForRuleEditor({
+      provider: "imap",
+    });
+
+    expect(actions).toEqual([
+      ActionType.REPLY,
+      ActionType.FORWARD,
+      ActionType.SEND_EMAIL,
+    ]);
+  });
 });
 
 describe("getExtraAvailableActionsForRuleEditor", () => {

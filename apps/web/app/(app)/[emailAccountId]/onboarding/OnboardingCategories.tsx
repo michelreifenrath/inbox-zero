@@ -43,6 +43,7 @@ import { TooltipExplanation } from "@/components/TooltipExplanation";
 import {
   isGoogleProvider,
   isMicrosoftProvider,
+  supportsProviderWriteActions,
 } from "@/utils/email/provider-types";
 import { MutedText } from "@/components/Typography";
 
@@ -64,11 +65,11 @@ export function CategoriesSetup({
   >([]);
   const [basicCategories, setBasicCategories] = React.useState<
     CategoryConfig[]
-  >(
+  >(() =>
     categoryConfig(provider).map((c) => ({
       name: c.key,
       description: "",
-      action: c.action,
+      action: supportsProviderWriteActions(provider) ? c.action : undefined,
       key: c.key,
     })),
   );
@@ -215,6 +216,8 @@ function CategoryCard({
   useTooltip: boolean;
   provider: string;
 }) {
+  const supportsWriteActions = supportsProviderWriteActions(provider);
+
   return (
     <Card>
       <CardContent className="flex items-center gap-4 p-4">
@@ -240,9 +243,10 @@ function CategoryCard({
           </div>
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-4">
+        <div className="ml-auto flex max-w-[220px] shrink-0 flex-col items-end gap-1">
           <Select
-            value={value || undefined}
+            disabled={!supportsWriteActions}
+            value={supportsWriteActions ? value || undefined : "none"}
             onValueChange={(value) => {
               update(index, {
                 action:
@@ -254,7 +258,7 @@ function CategoryCard({
               <SelectValue placeholder="Select action" />
             </SelectTrigger>
             <SelectContent>
-              {isMicrosoftProvider(provider) && (
+              {supportsWriteActions && isMicrosoftProvider(provider) && (
                 <>
                   <SelectItem value="label">Categorise</SelectItem>
                   <SelectItem value="move_folder">Move to folder</SelectItem>
@@ -263,7 +267,7 @@ function CategoryCard({
                   </SelectItem> */}
                 </>
               )}
-              {isGoogleProvider(provider) && (
+              {supportsWriteActions && isGoogleProvider(provider) && (
                 <>
                   <SelectItem value="label">Label</SelectItem>
                   <SelectItem value="label_archive">Label & archive</SelectItem>
@@ -275,6 +279,12 @@ function CategoryCard({
               <SelectItem value="none">Do nothing</SelectItem>
             </SelectContent>
           </Select>
+          {!supportsWriteActions && (
+            <MutedText className="text-right text-xs">
+              IMAP accounts are read-only in Inbox Zero, so onboarding won't
+              create labels, folders, archives, or drafts.
+            </MutedText>
+          )}
         </div>
       </CardContent>
     </Card>

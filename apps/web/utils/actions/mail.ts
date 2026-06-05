@@ -6,6 +6,10 @@ import { sendEmailBody } from "@/utils/gmail/mail";
 import { actionClient } from "@/utils/actions/safe-action";
 import { SafeError } from "@/utils/error";
 import { createEmailProvider } from "@/utils/email/provider";
+import {
+  IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE,
+  supportsProviderWriteActions,
+} from "@/utils/email/provider-types";
 
 const isStatusOk = (status: number) => status >= 200 && status < 300;
 
@@ -19,6 +23,10 @@ export const archiveThreadAction = actionClient
       ctx: { emailAccountId, emailAccount, provider, logger },
       parsedInput: { threadId, labelId },
     }) => {
+      if (!supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,
@@ -46,6 +54,10 @@ export const trashThreadAction = actionClient
       ctx: { emailAccountId, emailAccount, provider, logger },
       parsedInput: { threadId },
     }) => {
+      if (!supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,
@@ -69,6 +81,10 @@ export const markReadThreadAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { threadId, read },
     }) => {
+      if (!supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,
@@ -100,6 +116,10 @@ export const createAutoArchiveFilterAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { from, gmailLabelId, labelName },
     }) => {
+      if (!supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,
@@ -122,6 +142,10 @@ export const createFilterAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { from, gmailLabelId },
     }) => {
+      if (!supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,
@@ -152,6 +176,10 @@ export const deleteFilterAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { id },
     }) => {
+      if (!supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,
@@ -180,6 +208,10 @@ export const createLabelAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { name, description },
     }) => {
+      if (!supportsProviderWriteActions(provider)) {
+        throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
+      }
+
       const emailProvider = await createEmailProvider({
         emailAccountId,
         provider,
