@@ -17,6 +17,13 @@ import type {
   SentMessagePage,
 } from "@/utils/email/types";
 import type { MailboxConnectionSettings } from "@/utils/email/imap/connection";
+import type { ImapSmtpClients } from "@/utils/email/imap/smtp";
+import {
+  forwardSmtpEmail,
+  replyToSmtpEmail,
+  sendSmtpEmail,
+  sendSmtpEmailWithHtml,
+} from "@/utils/email/imap/smtp";
 import {
   getThreadIdFromHeaders,
   normalizeMessageId,
@@ -72,6 +79,7 @@ export type ImapProviderClient = {
 
 type ImapProviderClients = {
   createClient?: (options: ImapFlowOptions) => ImapProviderClient;
+  createSmtpTransport?: ImapSmtpClients["createTransport"];
 };
 
 type ImapMailbox = {
@@ -137,6 +145,7 @@ export class ImapProvider implements EmailProvider {
     options: ImapFlowOptions,
   ) => ImapProviderClient;
   private readonly logger: Logger;
+  private readonly smtpClients: ImapSmtpClients;
 
   constructor(
     settings: MailboxConnectionSettings,
@@ -145,6 +154,9 @@ export class ImapProvider implements EmailProvider {
   ) {
     this.settings = settings;
     this.createClient = clients.createClient ?? createDefaultClient;
+    this.smtpClients = clients.createSmtpTransport
+      ? { createTransport: clients.createSmtpTransport }
+      : {};
     this.logger = (logger || createScopedLogger("imap-provider")).with({
       provider: "imap",
     });
@@ -546,7 +558,7 @@ export class ImapProvider implements EmailProvider {
     messageHtml: string;
     replyToMessageId?: string;
   }): Promise<{ id: string }> {
-    this.unsupported("createDraft");
+    this.unsupportedProviderStoredDrafts("createDraft");
   }
   async createFilter(_options: {
     from: string;
@@ -559,7 +571,7 @@ export class ImapProvider implements EmailProvider {
     this.unsupported("createLabel");
   }
   async deleteDraft(_draftId: string): Promise<void> {
-    this.unsupported("deleteDraft");
+    this.unsupportedProviderStoredDrafts("deleteDraft");
   }
   async deleteFilter(_id: string): Promise<{ status: number }> {
     this.unsupported("deleteFilter");
@@ -580,11 +592,11 @@ export class ImapProvider implements EmailProvider {
     _userEmail: string,
     _executedRule?: { id: string; threadId: string; emailAccountId: string },
   ): Promise<{ draftId: string }> {
-    this.unsupported("draftEmail");
+    this.unsupportedProviderStoredDrafts("draftEmail");
   }
   async forwardEmail(
-    _email: ParsedMessage,
-    _args: {
+    email: ParsedMessage,
+    args: {
       to: string;
       cc?: string;
       bcc?: string;
@@ -592,15 +604,35 @@ export class ImapProvider implements EmailProvider {
       from?: string;
     },
   ): Promise<void> {
-    this.unsupported("forwardEmail");
+    const parsedMessage = await this.getMessage(email.id);
+    const attachments = await Promise.all(
+      parsedMessage.attachments?.map(async (attachment) => {
+        const attachmentData = await this.getAttachment(
+          parsedMessage.id,
+          attachment.attachmentId,
+        );
+        return {
+          content: Buffer.from(attachmentData.data, "base64"),
+          contentType: attachment.mimeType,
+          filename: attachment.filename,
+        };
+      }) || [],
+    );
+
+    await forwardSmtpEmail(
+      this.settings,
+      parsedMessage,
+      { ...args, attachments },
+      this.smtpClients,
+    );
   }
   async getDraft(_draftId: string): Promise<ParsedMessage | null> {
-    this.unsupported("getDraft");
+    this.unsupportedProviderStoredDrafts("getDraft");
   }
   async getDrafts(_options?: {
     maxResults?: number;
   }): Promise<ParsedMessage[]> {
-    this.unsupported("getDrafts");
+    this.unsupportedProviderStoredDrafts("getDrafts");
   }
   async getFiltersList(): Promise<EmailFilter[]> {
     this.unsupported("getFiltersList");
@@ -672,22 +704,28 @@ export class ImapProvider implements EmailProvider {
     this.unsupported("removeThreadLabels");
   }
   async replyToEmail(
-    _email: ParsedMessage,
-    _content: string,
-    _options?: {
+    email: ParsedMessage,
+    content: string,
+    options?: {
       replyTo?: string;
       from?: string;
       attachments?: MailAttachment[];
     },
   ): Promise<void> {
-    this.unsupported("replyToEmail");
+    await replyToSmtpEmail(
+      this.settings,
+      email,
+      content,
+      options,
+      this.smtpClients,
+    );
   }
   async sendDraft(
     _draftId: string,
   ): Promise<{ messageId: string; threadId: string }> {
-    this.unsupported("sendDraft");
+    this.unsupportedProviderStoredDrafts("sendDraft");
   }
-  async sendEmail(_args: {
+  async sendEmail(args: {
     to: string;
     cc?: string;
     bcc?: string;
@@ -695,9 +733,9 @@ export class ImapProvider implements EmailProvider {
     messageText: string;
     attachments?: MailAttachment[];
   }): Promise<void> {
-    this.unsupported("sendEmail");
+    await sendSmtpEmail(this.settings, args, this.smtpClients);
   }
-  async sendEmailWithHtml(_body: {
+  async sendEmailWithHtml(body: {
     replyToEmail?: {
       threadId: string;
       headerMessageId: string;
@@ -717,7 +755,7 @@ export class ImapProvider implements EmailProvider {
       contentType: string;
     }>;
   }): Promise<{ messageId: string; threadId: string }> {
-    this.unsupported("sendEmailWithHtml");
+    return sendSmtpEmailWithHtml(this.settings, body, this.smtpClients);
   }
   async starMessage(_messageId: string): Promise<void> {
     this.unsupported("starMessage");
@@ -736,7 +774,7 @@ export class ImapProvider implements EmailProvider {
     _draftId: string,
     _params: { messageHtml?: string; subject?: string },
   ): Promise<void> {
-    this.unsupported("updateDraft");
+    this.unsupportedProviderStoredDrafts("updateDraft");
   }
   async watchEmails(): Promise<{
     expirationDate: Date;
@@ -1028,6 +1066,12 @@ export class ImapProvider implements EmailProvider {
         client.close();
       }
     }
+  }
+
+  private unsupportedProviderStoredDrafts(method: string): never {
+    throw new Error(
+      `IMAP provider does not support ${method}: provider-stored drafts are not available for generic IMAP accounts.`,
+    );
   }
 
   private unsupported(method: string): never {

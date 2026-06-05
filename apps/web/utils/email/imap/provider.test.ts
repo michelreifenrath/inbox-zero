@@ -424,19 +424,25 @@ describe("ImapProvider", () => {
     expect(client.openedMailboxes).not.toContain("Labels");
   });
 
-  it("throws clear errors for unsupported read-only operations", async () => {
+  it("throws explicit errors for unsupported provider-stored draft operations", async () => {
     const provider = new ImapProvider(settings, undefined, {
       createClient: () => new MockImapClient(),
     });
 
     await expect(
-      provider.sendEmail({
+      provider.createDraft({
         to: "to@example.com",
-        subject: "Nope",
-        messageText: "Body",
+        subject: "Draft",
+        messageHtml: "<p>Body</p>",
       }),
     ).rejects.toThrow(
-      "IMAP provider does not support sendEmail: this provider is read-only.",
+      "IMAP provider does not support createDraft: provider-stored drafts are not available for generic IMAP accounts.",
+    );
+    await expect(provider.sendDraft("draft-1")).rejects.toThrow(
+      "IMAP provider does not support sendDraft: provider-stored drafts are not available for generic IMAP accounts.",
+    );
+    await expect(provider.getDrafts()).rejects.toThrow(
+      "IMAP provider does not support getDrafts: provider-stored drafts are not available for generic IMAP accounts.",
     );
   });
 });
