@@ -348,7 +348,9 @@ export const createRulesOnboardingAction = actionClient
             provider,
             categoryAction: category.action,
             systemType,
-            draftReply: !!ruleConfiguration.draftReply,
+            draftReply:
+              !!ruleConfiguration.draftReply &&
+              supportsProviderStoredDrafts(provider),
             hasDigest: false,
           });
         }
@@ -382,11 +384,15 @@ export const createRulesOnboardingAction = actionClient
         const categoryAction =
           userSelectedAction || getCategoryAction(systemType, provider);
 
+        const draftReply =
+          !!ruleConfiguration.draftReply &&
+          supportsProviderStoredDrafts(provider);
+
         assertProviderSupportsCategoryAction({
           provider,
           categoryAction,
           systemType,
-          draftReply: !!ruleConfiguration.draftReply,
+          draftReply,
           hasDigest: false,
         });
 
@@ -397,7 +403,7 @@ export const createRulesOnboardingAction = actionClient
             categoryAction,
             label,
             hasDigest: false,
-            draftReply: !!ruleConfiguration.draftReply,
+            draftReply,
             provider,
             logger,
             systemType,

@@ -99,8 +99,8 @@ describe("email provider identity helpers", () => {
       mailboxMarkUnread: false,
       mailboxStar: true,
       mailboxSpam: false,
-      folderMove: false,
-      folderCreate: false,
+      folderMove: true,
+      folderCreate: true,
       labelActions: false,
       providerStoredDrafts: false,
       providerNativeFilters: false,
@@ -121,6 +121,9 @@ describe("email provider identity helpers", () => {
     expect(supportsProviderRuleAction("imap", ActionType.MARK_READ)).toBe(true);
     expect(supportsProviderRuleAction("imap", ActionType.STAR)).toBe(true);
     expect(supportsProviderRuleAction("imap", ActionType.LABEL)).toBe(false);
+    expect(supportsProviderRuleAction("imap", ActionType.MOVE_FOLDER)).toBe(
+      true,
+    );
     expect(supportsProviderRuleAction("google", ActionType.DRAFT_EMAIL)).toBe(
       true,
     );
@@ -137,9 +140,6 @@ describe("email provider identity helpers", () => {
       true,
     );
     expect(supportsProviderRuleAction("imap", ActionType.MARK_SPAM)).toBe(
-      false,
-    );
-    expect(supportsProviderRuleAction("imap", ActionType.MOVE_FOLDER)).toBe(
       false,
     );
     expect(supportsProviderCapability("imap", "providerNativeFilters")).toBe(

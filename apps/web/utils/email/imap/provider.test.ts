@@ -507,6 +507,93 @@ describe("ImapProvider", () => {
     ).toEqual([1, 2]);
   });
 
+  it("finds existing folder IDs by folder name or path", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Projects/Alpha", name: "Alpha", delimiter: "/" },
+      ],
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await expect(provider.getOrCreateFolderIdByName("Alpha")).resolves.toBe(
+      "Projects/Alpha",
+    );
+    await expect(
+      provider.getOrCreateFolderIdByName("Projects/Alpha"),
+    ).resolves.toBe("Projects/Alpha");
+    expect(client.createdMailboxes).toEqual([]);
+  });
+
+  it("creates missing folders and returns the folder path as the ID", async () => {
+    const client = new MockImapClient();
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await expect(
+      provider.getOrCreateFolderIdByName("Newsletter"),
+    ).resolves.toBe("Newsletter");
+
+    expect(client.createdMailboxes).toEqual(["Newsletter"]);
+    expect((await client.list()).map((folder) => folder.path)).toContain(
+      "Newsletter",
+    );
+  });
+
+  it("moves every thread message to an IMAP folder path", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Sent", name: "Sent", delimiter: "/", specialUse: "\\Sent" },
+        { path: "Newsletter", name: "Newsletter", delimiter: "/" },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+        Sent: [
+          buildStoredMessage(
+            2,
+            "reply@example.com",
+            "Re: Root",
+            "2030-01-01T10:00:00.000Z",
+            {
+              references: "<root@example.com>",
+              inReplyTo: "<root@example.com>",
+            },
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await provider.moveThreadToFolder(
+      "root@example.com",
+      "user@example.com",
+      "Newsletter",
+    );
+
+    expect(client.messages.INBOX).toEqual([]);
+    expect(client.messages.Sent).toEqual([]);
+    expect(client.messages.Newsletter?.map((message) => message.uid)).toEqual([
+      1, 2,
+    ]);
+    expect(client.openedMailboxOptions).toContainEqual({
+      path: "INBOX",
+      readOnly: false,
+    });
+  });
+
   it("trashes every thread message to the common-name trash folder", async () => {
     const client = new MockImapClient({
       folders: [
@@ -629,6 +716,7 @@ class MockImapClient implements ImapProviderClient {
   logout = vi.fn(async () => undefined);
   openedMailboxes: string[] = [];
   openedMailboxOptions: Array<{ path: string; readOnly?: boolean }> = [];
+  createdMailboxes: string[] = [];
   private currentMailbox = "INBOX";
   private readonly folders: Array<{
     path: string;
@@ -656,6 +744,19 @@ class MockImapClient implements ImapProviderClient {
 
   async list() {
     return this.folders;
+  }
+
+  async mailboxCreate(path: string) {
+    this.createdMailboxes.push(path);
+    if (!this.folders.some((folder) => folder.path === path)) {
+      this.folders.push({
+        path,
+        name: path.split("/").at(-1),
+        delimiter: "/",
+      });
+    }
+    this.messages[path] ||= [];
+    return true;
   }
 
   async status(path: string) {

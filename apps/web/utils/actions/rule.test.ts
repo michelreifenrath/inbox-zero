@@ -18,6 +18,7 @@ vi.mock("@/utils/rule/rule", async (importOriginal) => {
 });
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/server", () => ({ after: vi.fn() }));
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/email/provider", () => ({
   createEmailProvider: createEmailProviderMock,
@@ -39,6 +40,7 @@ import {
   importRulesAction,
   updateRuleAction,
 } from "@/utils/actions/rule";
+import { updateRule } from "@/utils/rule/rule";
 
 describe("enableDraftRepliesAction", () => {
   beforeEach(() => {
@@ -229,7 +231,7 @@ describe("updateRuleAction", () => {
     );
   });
 
-  it("rejects IMAP provider-write actions before creating a provider", async () => {
+  it("rejects unsupported IMAP provider-write actions before creating a provider", async () => {
     (
       prisma.emailAccount.findUnique as ReturnType<typeof vi.fn>
     ).mockResolvedValue({
@@ -248,9 +250,9 @@ describe("updateRuleAction", () => {
         digest: false,
         actions: [
           {
-            type: ActionType.ARCHIVE,
+            type: ActionType.LABEL,
             messagingChannelId: null,
-            labelId: null,
+            labelId: { name: "Needs Review", value: null },
             subject: null,
             content: null,
             to: null,
@@ -283,12 +285,82 @@ describe("updateRuleAction", () => {
   });
 });
 
+describe("updateRule", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.rule.findMany.mockResolvedValue([]);
+  });
+
+  it("resolves and persists IMAP move folder fields", async () => {
+    (prisma.rule.update as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "rule-1",
+      actions: [],
+      group: null,
+    });
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getOrCreateFolderIdByName: vi.fn(
+        async (folderName: string) => `imap-folder-${folderName}`,
+      ),
+    } as any);
+
+    await updateRule({
+      ruleId: "rule-1",
+      emailAccountId: "account-1",
+      provider: "imap",
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+      } as any,
+      result: {
+        name: "Finance",
+        condition: {
+          aiInstructions: "Move finance emails",
+          conditionalOperator: null,
+          static: {
+            from: null,
+            to: null,
+            subject: null,
+          },
+        },
+        actions: [
+          {
+            type: ActionType.MOVE_FOLDER,
+            fields: {
+              folderName: "Finance",
+            },
+            delayInMinutes: null,
+          },
+        ],
+      },
+    });
+
+    expect(prisma.rule.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          actions: {
+            deleteMany: {},
+            createMany: {
+              data: [
+                expect.objectContaining({
+                  type: ActionType.MOVE_FOLDER,
+                  folderName: "Finance",
+                  folderId: "imap-folder-Finance",
+                }),
+              ],
+            },
+          },
+        }),
+      }),
+    );
+  });
+});
+
 describe("createRulesOnboardingAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("rejects IMAP onboarding category write actions before changing rules", async () => {
+  it("rejects IMAP onboarding label actions before changing rules", async () => {
     (
       prisma.emailAccount.findUnique as ReturnType<typeof vi.fn>
     ).mockResolvedValue({
@@ -313,6 +385,63 @@ describe("createRulesOnboardingAction", () => {
     expect(prisma.rule.create).not.toHaveBeenCalled();
     expect(prisma.rule.update).not.toHaveBeenCalled();
     expect(prisma.rule.delete).not.toHaveBeenCalled();
+  });
+
+  it("creates IMAP onboarding system rules with folder moves", async () => {
+    (
+      prisma.emailAccount.findUnique as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      id: "account-1",
+      userId: "u1",
+      email: "owner@example.com",
+      account: { userId: "u1", provider: "imap" },
+      user: {},
+    });
+    prisma.rule.findFirst.mockResolvedValue(null);
+    prisma.rule.findMany.mockResolvedValue([]);
+    prisma.rule.create.mockResolvedValue({
+      id: "rule-newsletter",
+      name: "Newsletter",
+      actions: [{ type: ActionType.MOVE_FOLDER }],
+      group: null,
+    } as never);
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getOrCreateFolderIdByName: vi.fn(
+        async (folderName: string) => folderName,
+      ),
+    } as any);
+
+    const result = await createRulesOnboardingAction(
+      "account-1" as never,
+      [
+        {
+          name: SystemType.NEWSLETTER,
+          description: "",
+          key: SystemType.NEWSLETTER,
+          action: "move_folder",
+        },
+      ] as never,
+    );
+
+    expect(result?.serverError).toBeUndefined();
+    expect(prisma.rule.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          name: "Newsletter",
+          actions: {
+            createMany: {
+              data: [
+                expect.objectContaining({
+                  type: ActionType.MOVE_FOLDER,
+                  folderName: "Newsletter",
+                  folderId: "Newsletter",
+                }),
+              ],
+            },
+          },
+        }),
+      }),
+    );
   });
 });
 

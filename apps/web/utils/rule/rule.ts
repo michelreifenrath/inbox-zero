@@ -12,7 +12,7 @@ import {
   ruleHistoryRuleInclude,
   type RuleHistoryTrigger,
 } from "@/utils/rule/rule-history";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import { supportsProviderCapability } from "@/utils/email/provider-types";
 import { createEmailProvider } from "@/utils/email/provider";
 import { resolveLabelNameAndId } from "@/utils/label/resolve-label";
 import { getMissingRecipientMessage } from "@/utils/rule/recipient-validation";
@@ -784,6 +784,8 @@ async function mapActionFields(
 ) {
   await assertMessagingChannelsBelongToEmailAccount(actions, emailAccountId);
 
+  const supportsFolderMove = supportsProviderCapability(provider, "folderMove");
+
   const actionPromises = actions.map(
     async (a): Promise<RuleActionCreateData> => {
       const to = a.fields?.to?.trim() || null;
@@ -822,7 +824,7 @@ async function mapActionFields(
         a.type === ActionType.MOVE_FOLDER &&
         folderName &&
         !folderId &&
-        isMicrosoftProvider(provider)
+        supportsFolderMove
       ) {
         const emailProvider = await createEmailProvider({
           emailAccountId,
@@ -844,7 +846,7 @@ async function mapActionFields(
         subject: a.fields?.subject,
         content: a.fields?.content,
         url: a.fields?.webhookUrl,
-        ...(isMicrosoftProvider(provider) && {
+        ...(supportsFolderMove && {
           folderName: folderName ?? null,
           folderId,
         }),
