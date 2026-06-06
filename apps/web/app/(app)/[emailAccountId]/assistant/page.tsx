@@ -13,10 +13,16 @@ export const maxDuration = 300; // Applies to the actions
 
 export default async function AssistantPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ emailAccountId: string }>;
+  searchParams: Promise<{ onboarding?: string | string[] }>;
 }) {
-  const { emailAccountId } = await params;
+  const [{ emailAccountId }, resolvedSearchParams] = await Promise.all([
+    params,
+    searchParams,
+  ]);
+  const onboarding = getSingleSearchParamValue(resolvedSearchParams.onboarding);
   await checkUserOwnsEmailAccount({ emailAccountId });
 
   // onboarding redirect
@@ -30,7 +36,7 @@ export default async function AssistantPage({
       select: { id: true },
     });
 
-    if (!hasRule) {
+    if (!hasRule && onboarding !== "true") {
       redirect(prefixPath(emailAccountId, "/assistant?onboarding=true"));
     }
   }
@@ -46,4 +52,8 @@ export default async function AssistantPage({
       </Suspense>
     </EmailProvider>
   );
+}
+
+function getSingleSearchParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }

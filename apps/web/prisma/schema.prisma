@@ -18,6 +18,7 @@ model Account {
   provider              String
   type                  String        @default("oidc") // next-auth deprecated field
   providerAccountId     String
+  password              String?       @db.Text
   refresh_token         String?       @db.Text
   refreshTokenExpiresAt DateTime?
   access_token          String?       @db.Text
