@@ -226,7 +226,6 @@ export const hasAiAccess = (
 };
 
 export function getAiReadiness({
-  aiProvider,
   hasAiApiKey,
   hasDeploymentAiConfiguration,
 }: {
@@ -234,7 +233,7 @@ export function getAiReadiness({
   hasAiApiKey?: boolean | null;
   hasDeploymentAiConfiguration?: boolean | null;
 }) {
-  const hasUserAiConfiguration = Boolean(aiProvider && hasAiApiKey);
+  const hasUserAiConfiguration = Boolean(hasAiApiKey);
   const hasAiConfiguration = Boolean(
     hasDeploymentAiConfiguration || hasUserAiConfiguration,
   );

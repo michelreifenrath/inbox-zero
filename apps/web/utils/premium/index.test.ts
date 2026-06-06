@@ -192,6 +192,21 @@ describe("AI readiness", () => {
     });
   });
 
+  it("reports AI configuration ready when the user configured a key without a provider", () => {
+    expect(
+      getAiReadiness({
+        aiProvider: null,
+        hasAiApiKey: true,
+        hasDeploymentAiConfiguration: false,
+      }),
+    ).toMatchObject({
+      hasAiConfiguration: true,
+      hasUserAiConfiguration: true,
+      hasDeploymentAiConfiguration: false,
+      needsAiConfiguration: false,
+    });
+  });
+
   it("reports AI configuration ready when a deployment model is configured", () => {
     expect(
       getAiReadiness({
