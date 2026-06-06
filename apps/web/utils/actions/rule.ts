@@ -933,8 +933,10 @@ function assertProviderSupportsRuleActions(
   }
 
   if (!supportsProviderStoredDrafts(provider)) {
-    const hasProviderDraftAction = actions.some(
-      (action) => action.type === ActionType.DRAFT_EMAIL,
+    const hasProviderDraftAction = actions.some((action) =>
+      [ActionType.DRAFT_EMAIL, ActionType.DRAFT_MESSAGING_CHANNEL].includes(
+        action.type,
+      ),
     );
 
     if (hasProviderDraftAction) {

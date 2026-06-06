@@ -78,6 +78,7 @@ const RULE_ACTION_REQUIRED_CAPABILITIES: Partial<
   ARCHIVE: "mailboxArchive",
   LABEL: "labelActions",
   DRAFT_EMAIL: "providerStoredDrafts",
+  DRAFT_MESSAGING_CHANNEL: "providerStoredDrafts",
   MARK_SPAM: "mailboxSpam",
   MARK_READ: "mailboxMarkRead",
   STAR: "mailboxStar",

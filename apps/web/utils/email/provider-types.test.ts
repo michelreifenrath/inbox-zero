@@ -118,9 +118,18 @@ describe("email provider identity helpers", () => {
       supportsProviderRuleAction("microsoft", ActionType.MOVE_FOLDER),
     ).toBe(true);
     expect(supportsProviderRuleAction("imap", ActionType.LABEL)).toBe(false);
+    expect(supportsProviderRuleAction("google", ActionType.DRAFT_EMAIL)).toBe(
+      true,
+    );
+    expect(
+      supportsProviderRuleAction("google", ActionType.DRAFT_MESSAGING_CHANNEL),
+    ).toBe(true);
     expect(supportsProviderRuleAction("imap", ActionType.DRAFT_EMAIL)).toBe(
       false,
     );
+    expect(
+      supportsProviderRuleAction("imap", ActionType.DRAFT_MESSAGING_CHANNEL),
+    ).toBe(false);
     expect(supportsProviderRuleAction("imap", ActionType.SEND_EMAIL)).toBe(
       true,
     );
