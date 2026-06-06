@@ -14,6 +14,8 @@ import {
 } from "@/utils/premium";
 import prisma from "@/utils/prisma";
 import type { Logger } from "@/utils/logger";
+import { ActionType } from "@/generated/prisma/enums";
+import type { RuleWithActions } from "@/utils/types";
 
 const DEFAULT_MAILBOX = "INBOX";
 const DEFAULT_MAX_MESSAGES = 100;
@@ -106,11 +108,15 @@ export async function syncImapAccount({
   const provider = new ImapProvider(settings, logger);
   const tier = getUserTier(emailAccount.user.premium);
   const userHasAiAccess = hasAiAccess(tier, !!emailAccount.user.aiApiKey);
-  const hasAutomationRules = emailAccount.rules.length > 0;
+  const rulesForMessageProcessing = userHasAiAccess
+    ? emailAccount.rules
+    : emailAccount.rules.filter(isStaticSenderCleanupRule);
+  const hasAutomationRules = rulesForMessageProcessing.length > 0;
   const hasFilingEnabled =
     emailAccount.filingEnabled && !!emailAccount.filingPrompt;
-  const shouldProcessMessages =
-    userHasAiAccess && (hasAutomationRules || hasFilingEnabled);
+  const shouldProcessMessages = userHasAiAccess
+    ? hasAutomationRules || hasFilingEnabled
+    : hasAutomationRules;
 
   return syncImapMailbox({
     emailAccountId,
@@ -151,7 +157,7 @@ export async function syncImapAccount({
           emailAccount,
           hasAutomationRules,
           hasAiAccess: userHasAiAccess,
-          rules: emailAccount.rules,
+          rules: rulesForMessageProcessing,
           logger: messageLogger,
         },
       );
@@ -472,4 +478,21 @@ function updateMailboxCursor(
 
 function formatImapMessageId(mailbox: string, uid: number) {
   return `${encodeURIComponent(mailbox)}:${uid}`;
+}
+
+function isStaticSenderCleanupRule(rule: RuleWithActions) {
+  return (
+    !!rule.from &&
+    !rule.to &&
+    !rule.subject &&
+    !rule.body &&
+    !rule.instructions &&
+    !rule.groupId &&
+    rule.actions.length > 0 &&
+    rule.actions.every(
+      (action) =>
+        action.type === ActionType.ARCHIVE ||
+        action.type === ActionType.MOVE_FOLDER,
+    )
+  );
 }

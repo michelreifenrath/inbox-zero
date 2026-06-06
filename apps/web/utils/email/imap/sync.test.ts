@@ -3,6 +3,7 @@ import prisma from "@/utils/__mocks__/prisma";
 import { getImapConnectionSettingsForEmail } from "@/utils/email-account-client";
 import type { Logger } from "@/utils/logger";
 import { processHistoryItem } from "@/utils/webhook/process-history-item";
+import { ActionType } from "@/generated/prisma/enums";
 import {
   pollImapEmailAccounts,
   syncImapAccount,
@@ -159,7 +160,7 @@ describe("syncImapAccount", () => {
     vi.clearAllMocks();
   });
 
-  it("selects AI user fields and passes them into message processing", async () => {
+  it("passes AI user fields and app-side sender rules into message processing", async () => {
     const emailAccount = {
       id: "email-account-id",
       userId: "user-id",
@@ -183,7 +184,8 @@ describe("syncImapAccount", () => {
         {
           id: "rule-id",
           enabled: true,
-          actions: [],
+          from: "news@example.com",
+          actions: [{ type: ActionType.ARCHIVE }],
         },
       ],
       user: {
@@ -245,6 +247,13 @@ describe("syncImapAccount", () => {
     expect(processHistoryItem).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({
+        hasAutomationRules: true,
+        rules: [
+          expect.objectContaining({
+            from: "news@example.com",
+            actions: [expect.objectContaining({ type: ActionType.ARCHIVE })],
+          }),
+        ],
         emailAccount: expect.objectContaining({
           userId: "user-id",
           user: expect.objectContaining({
@@ -253,6 +262,83 @@ describe("syncImapAccount", () => {
             aiApiKey: "api-key",
           }),
         }),
+      }),
+    );
+  });
+
+  it("processes app-side static sender cleanup rules without AI access", async () => {
+    vi.mocked(prisma.emailAccount.findUnique).mockResolvedValue({
+      id: "email-account-id",
+      userId: "user-id",
+      email: "imap@example.com",
+      about: null,
+      multiRuleSelectionEnabled: false,
+      sensitiveDataPolicy: null,
+      timezone: "UTC",
+      calendarBookingLink: null,
+      draftReplyConfidence: null,
+      autoCategorizeSenders: false,
+      filingEnabled: false,
+      filingPrompt: null,
+      filingConfirmationSendEmail: false,
+      imapSyncCursor: null,
+      account: {
+        provider: "imap",
+        disconnectedAt: null,
+      },
+      rules: [
+        {
+          id: "rule-id",
+          enabled: true,
+          from: "news@example.com",
+          to: null,
+          subject: null,
+          body: null,
+          instructions: null,
+          groupId: null,
+          actions: [{ type: ActionType.ARCHIVE }],
+        },
+      ],
+      user: {
+        aiProvider: null,
+        aiModel: null,
+        aiApiKey: null,
+        premium: null,
+      },
+    } as any);
+    vi.mocked(getImapConnectionSettingsForEmail).mockResolvedValue({
+      imap: {
+        host: "imap.example.com",
+        port: 993,
+        secure: true,
+      },
+      smtp: {
+        host: "smtp.example.com",
+        port: 465,
+        secure: true,
+      },
+      username: "imap@example.com",
+      password: "password",
+      timeoutMs: 1000,
+    });
+
+    await syncImapAccount({
+      emailAccountId: "email-account-id",
+      logger: mockLogger(),
+      createClient: () => new MockImapClient({ uidValidity: 7, uids: [1] }),
+    });
+
+    expect(processHistoryItem).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        hasAutomationRules: true,
+        hasAiAccess: false,
+        rules: [
+          expect.objectContaining({
+            from: "news@example.com",
+            actions: [expect.objectContaining({ type: ActionType.ARCHIVE })],
+          }),
+        ],
       }),
     );
   });

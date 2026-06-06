@@ -55,7 +55,7 @@ import { ResubscribeDialog } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe
 import { LabelsSubMenu } from "@/components/LabelsSubMenu";
 import type { EmailLabel } from "@/providers/email-label-types";
 import { useAccount } from "@/providers/EmailAccountProvider";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import { isGoogleProvider, isImapProvider } from "@/utils/email/provider-types";
 import { getEmailTerminology } from "@/utils/terminology";
 import { Tooltip } from "@/components/Tooltip";
 
@@ -293,25 +293,34 @@ export function MoreDropdown<T extends Row>({
     emailAccountId,
   });
 
+  const isImap = isImapProvider(provider);
+
   const handleLabelClick = async (label: EmailLabel) => {
     const res = await createFilterAction(emailAccountId, {
       from: item.name,
       gmailLabelId: label.id,
+      labelName: label.name,
     });
     if (res?.serverError) {
       toastError({
         title: "Error",
-        description: `Failed to add ${item.name} to ${label.name}. ${res.serverError || ""}`,
+        description: isImap
+          ? `Failed to move future emails from ${item.name} to ${label.name}. ${res.serverError || ""}`
+          : `Failed to add ${item.name} to ${label.name}. ${res.serverError || ""}`,
       });
     } else {
       toastSuccess({
         title: "Success!",
-        description: `Added ${item.name} to ${label.name}`,
+        description: isImap
+          ? `Future emails from ${item.name} will move to ${label.name}`
+          : `Added ${item.name} to ${label.name}`,
       });
     }
   };
 
-  const labelMenuLabel = `${terminology.label.action} future emails`;
+  const labelMenuLabel = isImap
+    ? "Move future emails to folder"
+    : `${terminology.label.action} future emails`;
 
   return (
     <>
@@ -415,7 +424,8 @@ export function MoreDropdown<T extends Row>({
               ))
             ) : (
               <p className="px-3 py-2 text-sm text-muted-foreground">
-                You don't have any {terminology.label.plural} yet.
+                You don't have any{" "}
+                {isImap ? "folders" : terminology.label.plural} yet.
               </p>
             )}
           </div>

@@ -35,11 +35,16 @@ export async function onAutoArchive({
 export async function onDeleteFilter({
   emailAccountId,
   filterId,
+  from,
 }: {
   emailAccountId: string;
-  filterId: string;
+  filterId?: string | null;
+  from?: string;
 }) {
-  const result = await deleteFilterAction(emailAccountId, { id: filterId });
+  const result = await deleteFilterAction(emailAccountId, {
+    id: filterId || undefined,
+    from,
+  });
   if (result?.serverError) {
     toastError({
       description:
