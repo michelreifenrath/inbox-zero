@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
 import { verifyMailboxConnection } from "@/utils/email/imap/connection";
 import { STRATO_IMAP_PRESET } from "@/utils/email/imap-presets";
+import { pollImapEmailAccounts } from "@/utils/email/imap/sync";
 import { SafeError } from "@/utils/error";
 import {
   connectImapMailboxAction,
@@ -15,6 +16,9 @@ vi.mock("node:dns/promises", () => ({
 }));
 vi.mock("@/utils/email/imap/connection", () => ({
   verifyMailboxConnection: vi.fn(),
+}));
+vi.mock("@/utils/email/imap/sync", () => ({
+  pollImapEmailAccounts: vi.fn(),
 }));
 vi.mock("@/utils/auth", () => ({
   auth: vi.fn(async () => ({
@@ -75,12 +79,24 @@ const customConnectionData = {
 
 const mockedLookup = vi.mocked(lookup);
 const mockedVerifyMailboxConnection = vi.mocked(verifyMailboxConnection);
+const mockedPollImapEmailAccounts = vi.mocked(pollImapEmailAccounts);
 
 describe("connectStratoMailboxAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     mockedVerifyMailboxConnection.mockResolvedValue(undefined);
+    mockedPollImapEmailAccounts.mockResolvedValue([
+      {
+        status: "success",
+        emailAccountId: "email-account-1",
+        mailbox: "INBOX",
+        processed: 0,
+        lastUid: 0,
+        uidValidity: "123",
+        uidValidityChanged: false,
+      },
+    ]);
     prisma.emailAccount.findUnique.mockResolvedValue(null);
     prisma.account.findUnique.mockResolvedValue(null);
     prisma.emailAccount.create.mockResolvedValue({
@@ -97,6 +113,8 @@ describe("connectStratoMailboxAction", () => {
       status: "created",
       emailAccountId: "email-account-1",
       email: "user@example.com",
+      initialSyncStatus: "success",
+      initialSyncMessagesProcessed: 0,
     });
     expect(mockedVerifyMailboxConnection).toHaveBeenCalledWith({
       imap: STRATO_IMAP_PRESET.imap,
@@ -126,6 +144,34 @@ describe("connectStratoMailboxAction", () => {
         emailAccountId: "email-account-1",
       },
     });
+    expect(mockedPollImapEmailAccounts).toHaveBeenCalledWith({
+      emailAccountIds: ["email-account-1"],
+      logger: expect.any(Object),
+    });
+    expect(JSON.stringify(result?.data)).not.toContain("strato-password");
+  });
+
+  it("surfaces initial IMAP poll failures without leaking the mailbox password", async () => {
+    mockedPollImapEmailAccounts.mockResolvedValueOnce([
+      {
+        emailAccountId: "email-account-1",
+        status: "error",
+        message: "Failed to poll IMAP account.",
+        errorDetails: "authentication failed for strato-password",
+      },
+    ]);
+
+    const result = await connectStratoMailboxAction(input);
+
+    expect(result?.serverError).toBeUndefined();
+    expect(result?.data).toEqual({
+      status: "created",
+      emailAccountId: "email-account-1",
+      email: "user@example.com",
+      initialSyncStatus: "error",
+      initialSyncError: "Failed to poll IMAP account.",
+      initialSyncErrorDetails: "authentication failed for [redacted]",
+    });
     expect(JSON.stringify(result?.data)).not.toContain("strato-password");
   });
 
@@ -137,6 +183,8 @@ describe("connectStratoMailboxAction", () => {
       status: "created",
       emailAccountId: "email-account-1",
       email: "user@example.com",
+      initialSyncStatus: "success",
+      initialSyncMessagesProcessed: 0,
     });
     expect(mockedVerifyMailboxConnection).toHaveBeenCalledWith({
       imap: {
@@ -256,6 +304,8 @@ describe("connectStratoMailboxAction", () => {
       status: "updated",
       emailAccountId: "existing-email-account",
       email: "user@example.com",
+      initialSyncStatus: "success",
+      initialSyncMessagesProcessed: 0,
     });
     expect(mockedVerifyMailboxConnection).toHaveBeenCalledWith({
       imap: STRATO_IMAP_PRESET.imap,
@@ -279,6 +329,10 @@ describe("connectStratoMailboxAction", () => {
         emailAccountId: "existing-email-account",
       },
       update: stratoConnectionData,
+    });
+    expect(mockedPollImapEmailAccounts).toHaveBeenCalledWith({
+      emailAccountIds: ["existing-email-account"],
+      logger: expect.any(Object),
     });
     expect(prisma.emailAccount.create).not.toHaveBeenCalled();
     expect(JSON.stringify(result?.data)).not.toContain("strato-password");

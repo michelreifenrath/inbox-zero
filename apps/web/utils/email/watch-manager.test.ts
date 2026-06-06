@@ -5,6 +5,7 @@ import { cleanupInvalidTokens } from "@/utils/auth/cleanup-invalid-tokens";
 import { createEmailProvider } from "@/utils/email/provider";
 import { pollImapEmailAccounts } from "@/utils/email/imap/sync";
 import { captureException } from "@/utils/error";
+import { hasAiAccess } from "@/utils/premium";
 import { ensureEmailAccountsWatched } from "./watch-manager";
 
 vi.mock("@/utils/prisma");
@@ -43,6 +44,7 @@ const logger = createTestLogger();
 describe("ensureEmailAccountsWatched", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(hasAiAccess).mockReturnValue(true);
   });
 
   it("polls IMAP accounts instead of setting up provider push watches", async () => {
@@ -95,6 +97,106 @@ describe("ensureEmailAccountsWatched", () => {
         status: "success",
         syncType: "imap-poll",
         messagesProcessed: 2,
+      },
+    ]);
+  });
+
+  it("continues polling IMAP accounts when the user has no AI access", async () => {
+    vi.mocked(hasAiAccess).mockReturnValue(false);
+    vi.mocked(prisma.emailAccount.findMany).mockResolvedValue([
+      {
+        id: "imap-email-account-id",
+        email: "imap@example.com",
+        watchEmailsExpirationDate: null,
+        watchEmailsSubscriptionId: null,
+        account: {
+          provider: "imap",
+          access_token: null,
+          refresh_token: null,
+          expires_at: null,
+          disconnectedAt: null,
+        },
+        user: {
+          id: "user-id",
+          aiApiKey: null,
+          premium: null,
+        },
+      },
+    ] as any);
+
+    vi.mocked(pollImapEmailAccounts).mockResolvedValue([
+      {
+        status: "success",
+        emailAccountId: "imap-email-account-id",
+        mailbox: "INBOX",
+        processed: 1,
+        lastUid: 11,
+        uidValidity: "123",
+        uidValidityChanged: false,
+      },
+    ]);
+
+    const results = await ensureEmailAccountsWatched({
+      userIds: null,
+      logger,
+    });
+
+    expect(pollImapEmailAccounts).toHaveBeenCalledWith({
+      emailAccountIds: ["imap-email-account-id"],
+      logger: expect.any(Object),
+    });
+    expect(results).toEqual([
+      {
+        emailAccountId: "imap-email-account-id",
+        status: "success",
+        syncType: "imap-poll",
+        messagesProcessed: 1,
+      },
+    ]);
+  });
+
+  it("returns IMAP poll errors with details for troubleshooting", async () => {
+    vi.mocked(prisma.emailAccount.findMany).mockResolvedValue([
+      {
+        id: "imap-email-account-id",
+        email: "imap@example.com",
+        watchEmailsExpirationDate: null,
+        watchEmailsSubscriptionId: null,
+        account: {
+          provider: "imap",
+          access_token: null,
+          refresh_token: null,
+          expires_at: null,
+          disconnectedAt: null,
+        },
+        user: {
+          id: "user-id",
+          aiApiKey: null,
+          premium: null,
+        },
+      },
+    ] as any);
+
+    vi.mocked(pollImapEmailAccounts).mockResolvedValue([
+      {
+        emailAccountId: "imap-email-account-id",
+        status: "error",
+        message: "Failed to poll IMAP account.",
+        errorDetails: "auth failed",
+      },
+    ]);
+
+    const results = await ensureEmailAccountsWatched({
+      userIds: null,
+      logger,
+    });
+
+    expect(results).toEqual([
+      {
+        emailAccountId: "imap-email-account-id",
+        status: "error",
+        message: "Failed to poll IMAP account.",
+        errorDetails: "auth failed",
       },
     ]);
   });

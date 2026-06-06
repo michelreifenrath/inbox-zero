@@ -140,6 +140,24 @@ async function watchEmailAccount(
 ): Promise<WatchEmailAccountResult | null> {
   const { account, user, watchEmailsExpirationDate } = emailAccount;
 
+  if (isImapProvider(account?.provider)) {
+    logger.info("Polling IMAP account");
+
+    const [result] = await pollImapEmailAccounts({
+      emailAccountIds: [emailAccount.id],
+      logger,
+    });
+
+    if (!result || result.status === "error") return result || null;
+
+    return {
+      emailAccountId: emailAccount.id,
+      status: "success",
+      syncType: "imap-poll",
+      messagesProcessed: result.processed,
+    };
+  }
+
   const userHasAiAccess = hasAiAccess(
     getUserTier(user.premium),
     !!user.aiApiKey,
@@ -162,24 +180,6 @@ async function watchEmailAccount(
     }
 
     return null;
-  }
-
-  if (isImapProvider(account?.provider)) {
-    logger.info("Polling IMAP account");
-
-    const [result] = await pollImapEmailAccounts({
-      emailAccountIds: [emailAccount.id],
-      logger,
-    });
-
-    if (!result || result.status === "error") return result || null;
-
-    return {
-      emailAccountId: emailAccount.id,
-      status: "success",
-      syncType: "imap-poll",
-      messagesProcessed: result.processed,
-    };
   }
 
   if (!account?.access_token || !account?.refresh_token) {
