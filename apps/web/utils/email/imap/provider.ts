@@ -36,6 +36,18 @@ const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_THREAD_SCAN_LIMIT = 100;
 const INBOX = "INBOX";
 const SENT_SPECIAL_USE = "\\Sent";
+const ARCHIVE_SPECIAL_USE = "\\Archive";
+const TRASH_SPECIAL_USE = "\\Trash";
+const ARCHIVE_FOLDER_NAMES = ["archive", "archives", "archiv"];
+const TRASH_FOLDER_NAMES = [
+  "trash",
+  "deleted",
+  "deleted items",
+  "bin",
+  "papierkorb",
+  "gelöscht",
+  "gelöschte elemente",
+];
 const NON_SELECTABLE_FOLDER_FLAGS = new Set(["\\noselect", "\\nonexistent"]);
 
 export type ImapProviderClient = {
@@ -75,6 +87,21 @@ export type ImapProviderClient = {
     query: ImapFetchQuery,
     options?: { uid?: boolean },
   ): Promise<ImapFetchMessage | false>;
+  messageMove(
+    range: number[],
+    destination: string,
+    options?: { uid?: boolean },
+  ): Promise<unknown | false>;
+  messageFlagsAdd(
+    range: number[],
+    flags: string[],
+    options?: { uid?: boolean },
+  ): Promise<unknown | false>;
+  messageFlagsRemove(
+    range: number[],
+    flags: string[],
+    options?: { uid?: boolean },
+  ): Promise<unknown | false>;
 };
 
 type ImapProviderClients = {
@@ -410,14 +437,9 @@ export class ImapProvider implements EmailProvider {
   }
 
   async getThreadMessages(threadId: string): Promise<ParsedMessage[]> {
-    return this.withClient(async (client) => {
-      const folders = (await client.list()).filter(isSelectableFolder);
-      return this.getThreadMessagesFromMailboxes(
-        client,
-        threadId,
-        folders.map((folder) => folder.path),
-      );
-    });
+    return this.withClient((client) =>
+      this.getThreadMessagesWithClient(client, threadId),
+    );
   }
 
   async getThreadMessagesInInbox(threadId: string): Promise<ParsedMessage[]> {
@@ -515,18 +537,22 @@ export class ImapProvider implements EmailProvider {
     this.unsupported("getAccessToken");
   }
 
-  async archiveMessage(_messageId: string): Promise<void> {
-    this.unsupported("archiveMessage");
+  async archiveMessage(messageId: string): Promise<void> {
+    const { mailbox, uid } = parseImapMessageId(messageId);
+    await this.withClient(async (client) => {
+      const archiveMailbox = await this.findArchiveMailbox(client);
+      await this.moveMessages(client, [{ mailbox, uid }], archiveMailbox);
+    });
   }
-  async archiveThread(_threadId: string, _ownerEmail: string): Promise<void> {
-    this.unsupported("archiveThread");
+  async archiveThread(threadId: string, _ownerEmail: string): Promise<void> {
+    await this.archiveThreadMessages(threadId);
   }
   async archiveThreadWithLabel(
-    _threadId: string,
+    threadId: string,
     _ownerEmail: string,
     _labelId?: string,
   ): Promise<void> {
-    this.unsupported("archiveThreadWithLabel");
+    await this.archiveThreadMessages(threadId);
   }
   async blockUnsubscribedEmail(_messageId: string): Promise<void> {
     this.unsupported("blockUnsubscribedEmail");
@@ -678,11 +704,14 @@ export class ImapProvider implements EmailProvider {
   }): Promise<{ usedFallback?: boolean; actualLabelId?: string }> {
     this.unsupported("labelMessage");
   }
-  async markRead(_threadId: string): Promise<void> {
-    this.unsupported("markRead");
+  async markRead(threadId: string): Promise<void> {
+    await this.markReadThread(threadId, true);
   }
-  async markReadThread(_threadId: string, _read: boolean): Promise<void> {
-    this.unsupported("markReadThread");
+  async markReadThread(threadId: string, read: boolean): Promise<void> {
+    await this.withClient(async (client) => {
+      const messages = await this.getThreadMessagesWithClient(client, threadId);
+      await this.updateMessageFlag(client, messages, "\\Seen", read);
+    });
   }
   async markSpam(_threadId: string): Promise<void> {
     this.unsupported("markSpam");
@@ -757,15 +786,26 @@ export class ImapProvider implements EmailProvider {
   }): Promise<{ messageId: string; threadId: string }> {
     return sendSmtpEmailWithHtml(this.settings, body, this.smtpClients);
   }
-  async starMessage(_messageId: string): Promise<void> {
-    this.unsupported("starMessage");
+  async starMessage(messageId: string): Promise<void> {
+    const { mailbox, uid } = parseImapMessageId(messageId);
+    await this.withClient((client) =>
+      this.updateMessageFlag(client, [{ mailbox, uid }], "\\Flagged", true),
+    );
   }
   async trashThread(
-    _threadId: string,
+    threadId: string,
     _ownerEmail: string,
     _actionSource: "user" | "automation",
   ): Promise<void> {
-    this.unsupported("trashThread");
+    await this.withClient(async (client) => {
+      const trashMailbox = await this.findTrashMailbox(client);
+      const messages = await this.getThreadMessagesWithClient(client, threadId);
+      await this.moveMessages(
+        client,
+        messages.map(({ id }) => parseImapMessageId(id)),
+        trashMailbox,
+      );
+    });
   }
   async unwatchEmails(_subscriptionId?: string): Promise<void> {
     this.unsupported("unwatchEmails");
@@ -872,6 +912,86 @@ export class ImapProvider implements EmailProvider {
           ? encodePageToken({ allMailboxes: true, offset: offset + pageSize })
           : undefined,
     };
+  }
+
+  private async getThreadMessagesWithClient(
+    client: ImapProviderClient,
+    threadId: string,
+  ) {
+    const folders = (await client.list()).filter(isSelectableFolder);
+    return this.getThreadMessagesFromMailboxes(
+      client,
+      threadId,
+      folders.map((folder) => folder.path),
+    );
+  }
+
+  private async archiveThreadMessages(threadId: string) {
+    await this.withClient(async (client) => {
+      const archiveMailbox = await this.findArchiveMailbox(client);
+      const messages = await this.getThreadMessagesWithClient(client, threadId);
+      await this.moveMessages(
+        client,
+        messages.map(({ id }) => parseImapMessageId(id)),
+        archiveMailbox,
+      );
+    });
+  }
+
+  private async moveMessages(
+    client: ImapProviderClient,
+    messages: Array<{ mailbox: string; uid: number }>,
+    destination: string,
+  ) {
+    const messagesByMailbox = groupMessageUidsByMailbox(
+      messages.filter((message) => message.mailbox !== destination),
+    );
+
+    for (const [mailbox, uids] of messagesByMailbox) {
+      await this.withMailbox(
+        client,
+        mailbox,
+        async () => {
+          const result = await client.messageMove(uids, destination, {
+            uid: true,
+          });
+          if (result === false) {
+            throw new Error(
+              `IMAP move failed from ${mailbox} to ${destination}.`,
+            );
+          }
+        },
+        { readOnly: false },
+      );
+    }
+  }
+
+  private async updateMessageFlag(
+    client: ImapProviderClient,
+    messages: Array<{ mailbox: string; uid: number } | ParsedMessage>,
+    flag: string,
+    enabled: boolean,
+  ) {
+    const parsedMessages = messages.map((message) =>
+      "uid" in message ? message : parseImapMessageId(message.id),
+    );
+    const messagesByMailbox = groupMessageUidsByMailbox(parsedMessages);
+
+    for (const [mailbox, uids] of messagesByMailbox) {
+      await this.withMailbox(
+        client,
+        mailbox,
+        async () => {
+          const result = enabled
+            ? await client.messageFlagsAdd(uids, [flag], { uid: true })
+            : await client.messageFlagsRemove(uids, [flag], { uid: true });
+          if (result === false) {
+            throw new Error(`IMAP flag update failed for ${mailbox}.`);
+          }
+        },
+        { readOnly: false },
+      );
+    }
   }
 
   private async getThreadMessagesFromMailboxes(
@@ -1016,16 +1136,36 @@ export class ImapProvider implements EmailProvider {
     );
   }
 
+  private async findArchiveMailbox(client: ImapProviderClient) {
+    return findMailboxBySpecialUseOrName(
+      await client.list(),
+      ARCHIVE_SPECIAL_USE,
+      ARCHIVE_FOLDER_NAMES,
+      "Archive",
+    );
+  }
+
+  private async findTrashMailbox(client: ImapProviderClient) {
+    return findMailboxBySpecialUseOrName(
+      await client.list(),
+      TRASH_SPECIAL_USE,
+      TRASH_FOLDER_NAMES,
+      "Trash",
+    );
+  }
+
   private async withMailbox<T>(
     client: ImapProviderClient,
     mailbox: string,
     fn: () => Promise<T>,
+    options: { readOnly?: boolean } = {},
   ) {
+    const readOnly = options.readOnly ?? true;
     const lock = client.getMailboxLock
-      ? await client.getMailboxLock(mailbox, { readOnly: true })
+      ? await client.getMailboxLock(mailbox, { readOnly })
       : undefined;
 
-    if (!lock) await client.mailboxOpen?.(mailbox, { readOnly: true });
+    if (!lock) await client.mailboxOpen?.(mailbox, { readOnly });
 
     try {
       return await fn();
@@ -1089,6 +1229,62 @@ function isSelectableFolder(folder: ImapMailbox) {
   return !Array.from(folder.flags || []).some((flag) =>
     NON_SELECTABLE_FOLDER_FLAGS.has(flag.toLowerCase()),
   );
+}
+
+function findMailboxBySpecialUseOrName(
+  folders: ImapMailbox[],
+  specialUse: string,
+  folderNames: string[],
+  description: string,
+) {
+  const selectableFolders = folders.filter(isSelectableFolder);
+  const specialUseFolder = selectableFolders.find((folder) =>
+    hasSpecialUse(folder, specialUse),
+  );
+  if (specialUseFolder) return specialUseFolder.path;
+
+  const folderNamesSet = new Set(folderNames);
+  const namedFolder = selectableFolders.find((folder) =>
+    getMailboxNames(folder).some((name) => folderNamesSet.has(name)),
+  );
+  if (namedFolder) return namedFolder.path;
+
+  throw new Error(`IMAP ${description} folder not found.`);
+}
+
+function hasSpecialUse(folder: ImapMailbox, specialUse: string) {
+  const normalizedSpecialUse = specialUse.toLowerCase();
+  return (
+    folder.specialUse?.toLowerCase() === normalizedSpecialUse ||
+    Array.from(folder.flags || []).some(
+      (flag) => flag.toLowerCase() === normalizedSpecialUse,
+    )
+  );
+}
+
+function getMailboxNames(folder: ImapMailbox) {
+  return [
+    folder.path,
+    folder.name || "",
+    getFolderDisplayName(folder.path, folder.delimiter),
+  ]
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function groupMessageUidsByMailbox(
+  messages: Array<{ mailbox: string; uid: number }>,
+) {
+  const messagesByMailbox = new Map<string, number[]>();
+
+  for (const { mailbox, uid } of messages) {
+    messagesByMailbox.set(mailbox, [
+      ...(messagesByMailbox.get(mailbox) || []),
+      uid,
+    ]);
+  }
+
+  return messagesByMailbox;
 }
 
 function toFolderTree(folders: ImapMailbox[]): OutlookFolder[] {

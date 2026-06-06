@@ -77,12 +77,15 @@ describe("getAvailableActionsForRuleEditor", () => {
     ).toContain(ActionType.MOVE_FOLDER);
   });
 
-  it("keeps IMAP rules to SMTP send actions", () => {
+  it("exposes only implemented IMAP rule actions plus SMTP send actions", () => {
     const actions = getAvailableActionsForRuleEditor({
       provider: "imap",
     });
 
     expect(actions).toEqual([
+      ActionType.ARCHIVE,
+      ActionType.MARK_READ,
+      ActionType.STAR,
       ActionType.REPLY,
       ActionType.FORWARD,
       ActionType.SEND_EMAIL,
