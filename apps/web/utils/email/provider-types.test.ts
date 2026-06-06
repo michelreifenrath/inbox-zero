@@ -58,7 +58,7 @@ describe("email provider identity helpers", () => {
     expect(supportsProviderStoredDrafts("imap")).toBe(true);
     expect(supportsProviderSignatureLookup("imap")).toBe(false);
     expect(supportsProviderWriteActions("imap")).toBe(false);
-    expect(supportsBulkSenderActions("imap")).toBe(false);
+    expect(supportsBulkSenderActions("imap")).toBe(true);
   });
 
   it("exposes granular provider capabilities for OAuth providers and IMAP", () => {
@@ -104,7 +104,7 @@ describe("email provider identity helpers", () => {
       labelActions: false,
       providerStoredDrafts: true,
       providerNativeFilters: false,
-      bulkSenderActions: false,
+      bulkSenderActions: true,
       providerSignatureLookup: false,
     });
   });

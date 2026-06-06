@@ -587,18 +587,22 @@ export class ImapProvider implements EmailProvider {
     this.unsupported("blockUnsubscribedEmail");
   }
   async bulkArchiveFromSenders(
-    _fromEmails: string[],
+    fromEmails: string[],
     _ownerEmail: string,
     _emailAccountId: string,
   ): Promise<void> {
-    this.unsupported("bulkArchiveFromSenders");
+    await this.moveMessagesFromSenders(fromEmails, (client) =>
+      this.findArchiveMailbox(client),
+    );
   }
   async bulkTrashFromSenders(
-    _fromEmails: string[],
+    fromEmails: string[],
     _ownerEmail: string,
     _emailAccountId: string,
   ): Promise<void> {
-    this.unsupported("bulkTrashFromSenders");
+    await this.moveMessagesFromSenders(fromEmails, (client) =>
+      this.findTrashMailbox(client),
+    );
   }
   async createAutoArchiveFilter(_options: {
     from: string;
@@ -1280,6 +1284,32 @@ export class ImapProvider implements EmailProvider {
         messages.map(({ id }) => parseImapMessageId(id)),
         archiveMailbox,
       );
+    });
+  }
+
+  private async moveMessagesFromSenders(
+    fromEmails: string[],
+    getDestination: (client: ImapProviderClient) => Promise<string>,
+  ) {
+    const senders = fromEmails.map((email) => email.trim()).filter(Boolean);
+    if (!senders.length) return;
+
+    await this.withClient(async (client) => {
+      const destination = await getDestination(client);
+      const sourceFolders = (await client.list())
+        .filter(isSelectableFolder)
+        .filter((folder) => folder.path !== destination);
+
+      for (const sender of senders) {
+        const messages: Array<{ mailbox: string; uid: number }> = [];
+        for (const folder of sourceFolders) {
+          const uids = await this.searchUids(client, folder.path, {
+            from: sender,
+          });
+          messages.push(...uids.map((uid) => ({ mailbox: folder.path, uid })));
+        }
+        await this.moveMessages(client, messages, destination);
+      }
     });
   }
 

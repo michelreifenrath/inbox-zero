@@ -47,7 +47,7 @@ const PROVIDER_CAPABILITIES = {
     labelActions: false,
     providerStoredDrafts: true,
     providerNativeFilters: false,
-    bulkSenderActions: false,
+    bulkSenderActions: true,
     providerSignatureLookup: false,
   },
 } as const;
