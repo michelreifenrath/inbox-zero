@@ -3,6 +3,7 @@ import prisma from "@/utils/__mocks__/prisma";
 import { getImapConnectionSettingsForEmail } from "@/utils/email-account-client";
 import type { Logger } from "@/utils/logger";
 import { processHistoryItem } from "@/utils/webhook/process-history-item";
+import { ActionType } from "@/generated/prisma/enums";
 import {
   pollImapEmailAccounts,
   syncImapAccount,
@@ -159,7 +160,7 @@ describe("syncImapAccount", () => {
     vi.clearAllMocks();
   });
 
-  it("selects AI user fields and passes them into message processing", async () => {
+  it("passes AI user fields and app-side sender rules into message processing", async () => {
     const emailAccount = {
       id: "email-account-id",
       userId: "user-id",
@@ -183,7 +184,8 @@ describe("syncImapAccount", () => {
         {
           id: "rule-id",
           enabled: true,
-          actions: [],
+          from: "news@example.com",
+          actions: [{ type: ActionType.ARCHIVE }],
         },
       ],
       user: {
@@ -245,6 +247,13 @@ describe("syncImapAccount", () => {
     expect(processHistoryItem).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({
+        hasAutomationRules: true,
+        rules: [
+          expect.objectContaining({
+            from: "news@example.com",
+            actions: [expect.objectContaining({ type: ActionType.ARCHIVE })],
+          }),
+        ],
         emailAccount: expect.objectContaining({
           userId: "user-id",
           user: expect.objectContaining({

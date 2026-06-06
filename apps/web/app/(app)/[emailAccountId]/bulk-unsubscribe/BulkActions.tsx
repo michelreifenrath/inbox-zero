@@ -23,7 +23,10 @@ import { usePremium } from "@/hooks/usePremium";
 import { usePremiumModal } from "@/app/(app)/premium/PremiumModal";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { cn } from "@/utils";
-import { supportsProviderNativeFilters } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  supportsProviderNativeFilters,
+} from "@/utils/email/provider-types";
 import { getHttpUnsubscribeLink } from "@/utils/parse/unsubscribe";
 import {
   Dialog,
@@ -111,6 +114,8 @@ export function BulkActions({
   const { PremiumModal, openModal } = usePremiumModal();
   const { emailAccountId, provider } = useAccount();
   const supportsNativeFilters = supportsProviderNativeFilters(provider);
+  const supportsSenderCleanup =
+    supportsNativeFilters || isImapProvider(provider);
   const { onBulkUnsubscribe } = useBulkUnsubscribe({
     hasUnsubscribeAccess,
     mutate,
@@ -119,7 +124,7 @@ export function BulkActions({
     emailAccountId,
     onDeselectItem: deselectItem,
     filter,
-    supportsNativeFilters,
+    supportsSenderCleanup,
   });
 
   const { onBulkApprove } = useBulkApprove({
@@ -185,10 +190,10 @@ export function BulkActions({
     selectedNewsletters.every(
       (n) => n.status !== NewsletterStatus.UNSUBSCRIBED,
     ) &&
-    (supportsNativeFilters || hasUnsubscribeLinks);
+    (supportsSenderCleanup || hasUnsubscribeLinks);
 
   const hasBlockableLinks =
-    supportsNativeFilters &&
+    supportsSenderCleanup &&
     selectedNewsletters.some(
       (n) => !getHttpUnsubscribeLink({ unsubscribeLink: n.unsubscribeLink }),
     );

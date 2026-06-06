@@ -8,8 +8,11 @@ import { SafeError } from "@/utils/error";
 import { createEmailProvider } from "@/utils/email/provider";
 import {
   IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE,
+  isImapProvider,
   supportsProviderCapability,
 } from "@/utils/email/provider-types";
+import { ActionType } from "@/generated/prisma/enums";
+import { extractEmailAddress } from "@/utils/email";
 
 const isStatusOk = (status: number) => status >= 200 && status < 300;
 
@@ -121,6 +124,22 @@ export const createAutoArchiveFilterAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { from, gmailLabelId, labelName },
     }) => {
+      if (isImapProvider(provider)) {
+        await upsertAppSideSenderCleanupRule({
+          emailAccountId,
+          from,
+          action:
+            gmailLabelId || labelName
+              ? {
+                  type: ActionType.MOVE_FOLDER,
+                  folderId: gmailLabelId,
+                  folderName: labelName,
+                }
+              : { type: ActionType.ARCHIVE },
+        });
+        return;
+      }
+
       if (!supportsProviderCapability(provider, "providerNativeFilters")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
@@ -141,12 +160,31 @@ export const createAutoArchiveFilterAction = actionClient
 
 export const createFilterAction = actionClient
   .metadata({ name: "createFilter" })
-  .inputSchema(z.object({ from: z.string(), gmailLabelId: z.string() }))
+  .inputSchema(
+    z.object({
+      from: z.string(),
+      gmailLabelId: z.string(),
+      labelName: z.string().optional(),
+    }),
+  )
   .action(
     async ({
       ctx: { emailAccountId, provider, logger },
-      parsedInput: { from, gmailLabelId },
+      parsedInput: { from, gmailLabelId, labelName },
     }) => {
+      if (isImapProvider(provider)) {
+        await upsertAppSideSenderCleanupRule({
+          emailAccountId,
+          from,
+          action: {
+            type: ActionType.MOVE_FOLDER,
+            folderId: gmailLabelId,
+            folderName: labelName,
+          },
+        });
+        return;
+      }
+
       if (!supportsProviderCapability(provider, "providerNativeFilters")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
@@ -175,12 +213,21 @@ export const createFilterAction = actionClient
 
 export const deleteFilterAction = actionClient
   .metadata({ name: "deleteFilter" })
-  .inputSchema(z.object({ id: z.string() }))
+  .inputSchema(
+    z.object({ id: z.string().optional(), from: z.string().optional() }),
+  )
   .action(
     async ({
       ctx: { emailAccountId, provider, logger },
-      parsedInput: { id },
+      parsedInput: { id, from },
     }) => {
+      if (isImapProvider(provider)) {
+        await deleteAppSideSenderCleanupRule({ emailAccountId, id, from });
+        return;
+      }
+
+      if (!id) throw new SafeError("Filter id is required.");
+
       if (!supportsProviderCapability(provider, "providerNativeFilters")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
@@ -294,3 +341,94 @@ export const sendEmailAction = actionClient
       };
     },
   );
+
+type AppSideSenderCleanupAction =
+  | { type: typeof ActionType.ARCHIVE }
+  | {
+      type: typeof ActionType.MOVE_FOLDER;
+      folderId?: string | null;
+      folderName?: string | null;
+    };
+
+async function upsertAppSideSenderCleanupRule({
+  emailAccountId,
+  from,
+  action,
+}: {
+  emailAccountId: string;
+  from: string;
+  action: AppSideSenderCleanupAction;
+}) {
+  const sender = extractEmailAddress(from).trim().toLowerCase();
+  if (!sender) throw new SafeError("A valid sender email is required.");
+
+  const name = getSenderCleanupRuleName(sender);
+  const actionData = {
+    emailAccountId,
+    type: action.type,
+    folderId:
+      action.type === ActionType.MOVE_FOLDER ? (action.folderId ?? null) : null,
+    folderName:
+      action.type === ActionType.MOVE_FOLDER
+        ? (action.folderName ?? null)
+        : null,
+  };
+
+  return prisma.rule.upsert({
+    where: { name_emailAccountId: { name, emailAccountId } },
+    create: {
+      name,
+      emailAccountId,
+      enabled: true,
+      automate: true,
+      runOnThreads: false,
+      from: sender,
+      actions: { createMany: { data: [actionData] } },
+    },
+    update: {
+      enabled: true,
+      automate: true,
+      runOnThreads: false,
+      instructions: null,
+      from: sender,
+      to: null,
+      subject: null,
+      body: null,
+      systemType: null,
+      groupId: null,
+      actions: {
+        deleteMany: {},
+        createMany: { data: [actionData] },
+      },
+    },
+    include: { actions: true },
+  });
+}
+
+async function deleteAppSideSenderCleanupRule({
+  emailAccountId,
+  id,
+  from,
+}: {
+  emailAccountId: string;
+  id?: string;
+  from?: string;
+}) {
+  if (id) {
+    await prisma.rule.delete({
+      where: { id_emailAccountId: { id, emailAccountId } },
+    });
+    return;
+  }
+
+  const sender = from ? extractEmailAddress(from).trim().toLowerCase() : "";
+  if (!sender) throw new SafeError("A valid sender email is required.");
+
+  await prisma.rule.deleteMany({
+    where: { emailAccountId, name: getSenderCleanupRuleName(sender) },
+  });
+}
+
+function getSenderCleanupRuleName(sender: string) {
+  return `Sender cleanup: ${sender}`;
+}

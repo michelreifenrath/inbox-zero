@@ -35,6 +35,8 @@ import {
   getUserFacingUnsubscribeLink,
 } from "@/utils/parse/unsubscribe";
 import { useProductAnalytics } from "@/hooks/useProductAnalytics";
+import { useAccount } from "@/providers/EmailAccountProvider";
+import { isImapProvider } from "@/utils/email/provider-types";
 
 // Shared type for SWR mutate function
 type MutateFn = (
@@ -369,7 +371,7 @@ export function useBulkUnsubscribe<T extends Row>({
   emailAccountId,
   onDeselectItem,
   filter,
-  supportsNativeFilters,
+  supportsSenderCleanup,
 }: {
   hasUnsubscribeAccess: boolean;
   mutate: MutateFn;
@@ -378,7 +380,7 @@ export function useBulkUnsubscribe<T extends Row>({
   emailAccountId: string;
   onDeselectItem?: (id: string) => void;
   filter: NewsletterFilterType;
-  supportsNativeFilters: boolean;
+  supportsSenderCleanup: boolean;
 }) {
   const analytics = useProductAnalytics("bulk_unsubscribe");
   const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
@@ -392,7 +394,7 @@ export function useBulkUnsubscribe<T extends Row>({
         filter,
       });
 
-      const processableItems = supportsNativeFilters
+      const processableItems = supportsSenderCleanup
         ? items
         : items.filter((item) =>
             getAutomaticUnsubscribeLink(item.unsubscribeLink),
@@ -454,7 +456,7 @@ export function useBulkUnsubscribe<T extends Row>({
       filter,
       analytics,
       queueArchiveSenders,
-      supportsNativeFilters,
+      supportsSenderCleanup,
     ],
   );
 
@@ -508,6 +510,7 @@ export function useAutoArchive<T extends Row>({
   emailAccountId: string;
 }) {
   const [autoArchiveLoading, setAutoArchiveLoading] = useState(false);
+  const { provider } = useAccount();
   const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
 
   const onAutoArchiveClick = useCallback(async () => {
@@ -541,10 +544,11 @@ export function useAutoArchive<T extends Row>({
   const onDisableAutoArchive = useCallback(async () => {
     setAutoArchiveLoading(true);
 
-    if (item.autoArchived?.id) {
+    if (item.autoArchived?.id || isImapProvider(provider)) {
       await onDeleteFilter({
         emailAccountId,
-        filterId: item.autoArchived.id,
+        filterId: item.autoArchived?.id,
+        from: item.name,
       });
     }
     await setNewsletterStatusAction(emailAccountId, {
@@ -554,7 +558,7 @@ export function useAutoArchive<T extends Row>({
     await mutate();
 
     setAutoArchiveLoading(false);
-  }, [item.name, item.autoArchived?.id, mutate, emailAccountId]);
+  }, [item.name, item.autoArchived?.id, mutate, emailAccountId, provider]);
 
   const onAutoArchiveAndLabel = useCallback(
     async (labelId: string, labelName: string) => {
@@ -674,6 +678,7 @@ export function useApproveButton<T extends Row>({
   const [optimisticStatus, setOptimisticStatus] = useState<
     NewsletterStatus | null | undefined
   >(undefined);
+  const { provider } = useAccount();
 
   // Reset optimistic state when item.status changes (after mutate)
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally reset when item.status changes
@@ -725,10 +730,11 @@ export function useApproveButton<T extends Row>({
 
     try {
       // Delete any existing auto-archive filter without triggering a refetch
-      if (item.autoArchived?.id) {
+      if (item.autoArchived?.id || isImapProvider(provider)) {
         await onDeleteFilter({
           emailAccountId,
-          filterId: item.autoArchived.id,
+          filterId: item.autoArchived?.id,
+          from: item.name,
         });
       }
       // Set the new status
