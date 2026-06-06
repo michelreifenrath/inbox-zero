@@ -55,8 +55,8 @@ import {
   IMAP_UNSUPPORTED_DRAFT_FEATURE_MESSAGE,
   IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE,
   isGoogleProvider,
+  supportsProviderRuleAction,
   supportsProviderStoredDrafts,
-  supportsProviderWriteActions,
 } from "@/utils/email/provider-types";
 import { bulkProcessInboxEmails } from "@/utils/ai/choose-rule/bulk-process-emails";
 import { getEmailAccountForRuleExecution } from "@/utils/user/get";
@@ -915,8 +915,8 @@ function assertProviderSupportsRuleActions(
   provider: string,
   actions: { type: ActionType }[],
 ) {
-  if (!supportsProviderWriteActions(provider)) {
-    const hasProviderWriteAction = actions.some((action) =>
+  const hasUnsupportedProviderWriteAction = actions.some(
+    (action) =>
       [
         ActionType.ARCHIVE,
         ActionType.LABEL,
@@ -924,12 +924,12 @@ function assertProviderSupportsRuleActions(
         ActionType.MARK_SPAM,
         ActionType.MOVE_FOLDER,
         ActionType.STAR,
-      ].includes(action.type),
-    );
+      ].includes(action.type) &&
+      !supportsProviderRuleAction(provider, action.type),
+  );
 
-    if (hasProviderWriteAction) {
-      throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
-    }
+  if (hasUnsupportedProviderWriteAction) {
+    throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
   }
 
   if (!supportsProviderStoredDrafts(provider)) {

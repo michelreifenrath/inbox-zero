@@ -8,7 +8,7 @@ import { SafeError } from "@/utils/error";
 import { createEmailProvider } from "@/utils/email/provider";
 import {
   IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE,
-  supportsProviderWriteActions,
+  supportsProviderCapability,
 } from "@/utils/email/provider-types";
 
 const isStatusOk = (status: number) => status >= 200 && status < 300;
@@ -23,7 +23,7 @@ export const archiveThreadAction = actionClient
       ctx: { emailAccountId, emailAccount, provider, logger },
       parsedInput: { threadId, labelId },
     }) => {
-      if (!supportsProviderWriteActions(provider)) {
+      if (!supportsProviderCapability(provider, "mailboxArchive")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
 
@@ -54,7 +54,7 @@ export const trashThreadAction = actionClient
       ctx: { emailAccountId, emailAccount, provider, logger },
       parsedInput: { threadId },
     }) => {
-      if (!supportsProviderWriteActions(provider)) {
+      if (!supportsProviderCapability(provider, "mailboxTrash")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
 
@@ -81,7 +81,12 @@ export const markReadThreadAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { threadId, read },
     }) => {
-      if (!supportsProviderWriteActions(provider)) {
+      if (
+        !supportsProviderCapability(
+          provider,
+          read ? "mailboxMarkRead" : "mailboxMarkUnread",
+        )
+      ) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
 
@@ -116,7 +121,7 @@ export const createAutoArchiveFilterAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { from, gmailLabelId, labelName },
     }) => {
-      if (!supportsProviderWriteActions(provider)) {
+      if (!supportsProviderCapability(provider, "providerNativeFilters")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
 
@@ -142,7 +147,7 @@ export const createFilterAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { from, gmailLabelId },
     }) => {
-      if (!supportsProviderWriteActions(provider)) {
+      if (!supportsProviderCapability(provider, "providerNativeFilters")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
 
@@ -176,7 +181,7 @@ export const deleteFilterAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { id },
     }) => {
-      if (!supportsProviderWriteActions(provider)) {
+      if (!supportsProviderCapability(provider, "providerNativeFilters")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
 
@@ -208,7 +213,7 @@ export const createLabelAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { name, description },
     }) => {
-      if (!supportsProviderWriteActions(provider)) {
+      if (!supportsProviderCapability(provider, "labelActions")) {
         throw new SafeError(IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE);
       }
 
