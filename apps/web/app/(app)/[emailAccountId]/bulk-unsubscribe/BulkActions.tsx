@@ -23,6 +23,7 @@ import { usePremium } from "@/hooks/usePremium";
 import { usePremiumModal } from "@/app/(app)/premium/PremiumModal";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { cn } from "@/utils";
+import { supportsProviderNativeFilters } from "@/utils/email/provider-types";
 import { getHttpUnsubscribeLink } from "@/utils/parse/unsubscribe";
 import {
   Dialog,
@@ -108,7 +109,8 @@ export function BulkActions({
   const posthog = usePostHog();
   const { hasUnsubscribeAccess, mutate: refetchPremium } = usePremium();
   const { PremiumModal, openModal } = usePremiumModal();
-  const { emailAccountId } = useAccount();
+  const { emailAccountId, provider } = useAccount();
+  const supportsNativeFilters = supportsProviderNativeFilters(provider);
   const { onBulkUnsubscribe } = useBulkUnsubscribe({
     hasUnsubscribeAccess,
     mutate,
@@ -117,6 +119,7 @@ export function BulkActions({
     emailAccountId,
     onDeselectItem: deselectItem,
     filter,
+    supportsNativeFilters,
   });
 
   const { onBulkApprove } = useBulkApprove({
@@ -134,6 +137,7 @@ export function BulkActions({
     emailAccountId,
     onDeselectItem: deselectItem,
     filter,
+    supportsNativeFilters,
   });
 
   const { onBulkArchive, isBulkArchiving } = useBulkArchive({
@@ -148,20 +152,22 @@ export function BulkActions({
     emailAccountId,
   });
 
-  const getSelectedValues = () =>
-    Array.from(selected.entries())
-      .filter(([, value]) => value)
-      .map(([name, value]) => ({
-        name,
-        value,
-      }));
-
   const selectedCount = Array.from(selected.values()).filter(Boolean).length;
   const isVisible = selectedCount > 0;
 
   // Get the selected newsletters with their details
   const selectedNewsletters =
     newsletters?.filter((n) => selected.get(n.name)) || [];
+
+  const getSelectedValues = () => {
+    const selectedNewsletterByName = new Map<string, Newsletter>(
+      selectedNewsletters.map((newsletter) => [newsletter.name, newsletter]),
+    );
+
+    return Array.from(selected.entries())
+      .filter(([, value]) => value)
+      .map(([name]) => selectedNewsletterByName.get(name) ?? { name });
+  };
 
   // Check if all selected newsletters are already approved
   const allSelectedAreApproved = useMemo(() => {
@@ -171,17 +177,21 @@ export function BulkActions({
     );
   }, [selectedNewsletters]);
 
-  const allSelectedCanUnsubscribe = selectedNewsletters.every(
-    (n) => n.status !== NewsletterStatus.UNSUBSCRIBED,
-  );
-
   const hasUnsubscribeLinks = selectedNewsletters.some((n) =>
     getHttpUnsubscribeLink({ unsubscribeLink: n.unsubscribeLink }),
   );
 
-  const hasBlockableLinks = selectedNewsletters.some(
-    (n) => !getHttpUnsubscribeLink({ unsubscribeLink: n.unsubscribeLink }),
-  );
+  const allSelectedCanUnsubscribe =
+    selectedNewsletters.every(
+      (n) => n.status !== NewsletterStatus.UNSUBSCRIBED,
+    ) &&
+    (supportsNativeFilters || hasUnsubscribeLinks);
+
+  const hasBlockableLinks =
+    supportsNativeFilters &&
+    selectedNewsletters.some(
+      (n) => !getHttpUnsubscribeLink({ unsubscribeLink: n.unsubscribeLink }),
+    );
 
   const unsubscribeLabel =
     hasUnsubscribeLinks && hasBlockableLinks
@@ -231,11 +241,13 @@ export function BulkActions({
                       onClick={() => onBulkUnsubscribe(getSelectedValues())}
                     />
                   )}
-                  <ActionButton
-                    icon={ArchiveRestoreIcon}
-                    label="Auto Archive"
-                    onClick={() => setAutoArchiveDialogOpen(true)}
-                  />
+                  {supportsNativeFilters && (
+                    <ActionButton
+                      icon={ArchiveRestoreIcon}
+                      label="Auto Archive"
+                      onClick={() => setAutoArchiveDialogOpen(true)}
+                    />
+                  )}
                   <ActionButton
                     icon={
                       allSelectedAreApproved ? ThumbsDownIcon : ThumbsUpIcon
@@ -396,36 +408,38 @@ export function BulkActions({
       </Dialog>
 
       {/* Auto Archive Confirmation Dialog */}
-      <Dialog
-        open={autoArchiveDialogOpen}
-        onOpenChange={setAutoArchiveDialogOpen}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Auto archive these senders?</DialogTitle>
-            <DialogDescription>
-              Automatically archive all current and future emails from these
-              senders. They will no longer appear in your inbox.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setAutoArchiveDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                onBulkAutoArchive(getSelectedValues());
-                setAutoArchiveDialogOpen(false);
-              }}
-            >
-              Auto Archive
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {supportsNativeFilters && (
+        <Dialog
+          open={autoArchiveDialogOpen}
+          onOpenChange={setAutoArchiveDialogOpen}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Auto archive these senders?</DialogTitle>
+              <DialogDescription>
+                Automatically archive all current and future emails from these
+                senders. They will no longer appear in your inbox.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setAutoArchiveDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  onBulkAutoArchive(getSelectedValues());
+                  setAutoArchiveDialogOpen(false);
+                }}
+              >
+                Auto Archive
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <PremiumModal />
     </>

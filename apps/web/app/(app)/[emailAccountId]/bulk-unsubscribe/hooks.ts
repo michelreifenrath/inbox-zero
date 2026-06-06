@@ -369,6 +369,7 @@ export function useBulkUnsubscribe<T extends Row>({
   emailAccountId,
   onDeselectItem,
   filter,
+  supportsNativeFilters,
 }: {
   hasUnsubscribeAccess: boolean;
   mutate: MutateFn;
@@ -377,6 +378,7 @@ export function useBulkUnsubscribe<T extends Row>({
   emailAccountId: string;
   onDeselectItem?: (id: string) => void;
   filter: NewsletterFilterType;
+  supportsNativeFilters: boolean;
 }) {
   const analytics = useProductAnalytics("bulk_unsubscribe");
   const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
@@ -390,10 +392,17 @@ export function useBulkUnsubscribe<T extends Row>({
         filter,
       });
 
-      const messages = getBulkUnsubscribeMessages(items);
+      const processableItems = supportsNativeFilters
+        ? items
+        : items.filter((item) =>
+            getAutomaticUnsubscribeLink(item.unsubscribeLink),
+          );
+      if (processableItems.length === 0) return;
+
+      const messages = getBulkUnsubscribeMessages(processableItems);
 
       await executeBulkOperation({
-        items,
+        items: processableItems,
         mutate,
         filter,
         onDeselectItem,
@@ -445,6 +454,7 @@ export function useBulkUnsubscribe<T extends Row>({
       filter,
       analytics,
       queueArchiveSenders,
+      supportsNativeFilters,
     ],
   );
 
@@ -589,6 +599,7 @@ export function useBulkAutoArchive<T extends Row>({
   emailAccountId,
   onDeselectItem,
   filter,
+  supportsNativeFilters,
 }: {
   hasUnsubscribeAccess: boolean;
   mutate: MutateFn;
@@ -596,12 +607,13 @@ export function useBulkAutoArchive<T extends Row>({
   emailAccountId: string;
   onDeselectItem?: (id: string) => void;
   filter: NewsletterFilterType;
+  supportsNativeFilters: boolean;
 }) {
   const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
 
   const onBulkAutoArchive = useCallback(
     async (items: T[]) => {
-      if (!hasUnsubscribeAccess) return;
+      if (!hasUnsubscribeAccess || !supportsNativeFilters) return;
 
       await executeBulkOperation({
         items,
@@ -630,6 +642,7 @@ export function useBulkAutoArchive<T extends Row>({
       onDeselectItem,
       filter,
       queueArchiveSenders,
+      supportsNativeFilters,
     ],
   );
 
