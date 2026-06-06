@@ -47,7 +47,7 @@ describe("email provider identity helpers", () => {
     expect(isOAuthProvider(undefined)).toBe(false);
   });
 
-  it("keeps provider-stored and full provider-write capabilities off for IMAP", () => {
+  it("keeps provider-stored draft support on and full provider-write capabilities off for IMAP", () => {
     for (const provider of ["google", "microsoft"]) {
       expect(supportsProviderStoredDrafts(provider)).toBe(true);
       expect(supportsProviderSignatureLookup(provider)).toBe(true);
@@ -55,7 +55,7 @@ describe("email provider identity helpers", () => {
       expect(supportsBulkSenderActions(provider)).toBe(true);
     }
 
-    expect(supportsProviderStoredDrafts("imap")).toBe(false);
+    expect(supportsProviderStoredDrafts("imap")).toBe(true);
     expect(supportsProviderSignatureLookup("imap")).toBe(false);
     expect(supportsProviderWriteActions("imap")).toBe(false);
     expect(supportsBulkSenderActions("imap")).toBe(false);
@@ -102,7 +102,7 @@ describe("email provider identity helpers", () => {
       folderMove: true,
       folderCreate: true,
       labelActions: false,
-      providerStoredDrafts: false,
+      providerStoredDrafts: true,
       providerNativeFilters: false,
       bulkSenderActions: false,
       providerSignatureLookup: false,
@@ -131,11 +131,11 @@ describe("email provider identity helpers", () => {
       supportsProviderRuleAction("google", ActionType.DRAFT_MESSAGING_CHANNEL),
     ).toBe(true);
     expect(supportsProviderRuleAction("imap", ActionType.DRAFT_EMAIL)).toBe(
-      false,
+      true,
     );
     expect(
       supportsProviderRuleAction("imap", ActionType.DRAFT_MESSAGING_CHANNEL),
-    ).toBe(false);
+    ).toBe(true);
     expect(supportsProviderRuleAction("imap", ActionType.SEND_EMAIL)).toBe(
       true,
     );

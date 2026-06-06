@@ -1,11 +1,16 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
 import { ImapFlow, type ImapFlowOptions } from "imapflow";
+import MailComposer from "nodemailer/lib/mail-composer";
+import type Mail from "nodemailer/lib/mailer";
 import type { Attachment as MailAttachment } from "nodemailer/lib/mailer";
 import type { InboxZeroLabel } from "@/utils/label";
 import type { ThreadsQuery } from "@/utils/threads/validation";
 import type { OutlookFolder } from "@/utils/outlook/folders";
 import type { ParsedMessage } from "@/utils/types";
+import { shouldSkipAutoDraft } from "@/utils/auto-draft";
+import { handlePreviousDraftDeletion } from "@/utils/ai/choose-rule/draft-management";
 import { getLatestNonDraftMessage } from "@/utils/email/latest-message";
 import { getMessageTimestamp } from "@/utils/email/message-timestamp";
 import type {
@@ -19,17 +24,27 @@ import type {
 import type { MailboxConnectionSettings } from "@/utils/email/imap/connection";
 import type { ImapSmtpClients } from "@/utils/email/imap/smtp";
 import {
+  buildReplyAllRecipients,
+  formatCcList,
+  mergeAndDedupeRecipients,
+} from "@/utils/email/reply-all";
+import {
   forwardSmtpEmail,
   replyToSmtpEmail,
   sendSmtpEmail,
   sendSmtpEmailWithHtml,
 } from "@/utils/email/imap/smtp";
+import { formatReplySubject } from "@/utils/email/subject";
+import { buildThreadingHeaders } from "@/utils/email/threading";
 import {
   getThreadIdFromHeaders,
   normalizeMessageId,
   parseImapAttachment,
   parseImapMessage,
 } from "@/utils/email/imap/message-parser";
+import { buildReplyMessageText } from "@/utils/gmail/mail";
+import { createReplyContent } from "@/utils/gmail/reply";
+import { convertEmailHtmlToText } from "@/utils/mail";
 import { createScopedLogger, type Logger } from "@/utils/logger";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -38,6 +53,7 @@ const INBOX = "INBOX";
 const SENT_SPECIAL_USE = "\\Sent";
 const ARCHIVE_SPECIAL_USE = "\\Archive";
 const TRASH_SPECIAL_USE = "\\Trash";
+const DRAFTS_SPECIAL_USE = "\\Drafts";
 const ARCHIVE_FOLDER_NAMES = ["archive", "archives", "archiv"];
 const TRASH_FOLDER_NAMES = [
   "trash",
@@ -48,6 +64,8 @@ const TRASH_FOLDER_NAMES = [
   "gelöscht",
   "gelöschte elemente",
 ];
+const DRAFT_FOLDER_NAMES = ["drafts", "draft", "entwürfe", "entwurf"];
+const IMAP_DRAFT_ID_HEADER = "X-Inbox-Zero-Draft-Id";
 const NON_SELECTABLE_FOLDER_FLAGS = new Set(["\\noselect", "\\nonexistent"]);
 
 export type ImapProviderClient = {
@@ -103,6 +121,16 @@ export type ImapProviderClient = {
     flags: string[],
     options?: { uid?: boolean },
   ): Promise<unknown | false>;
+  messageDelete?(
+    range: number[],
+    options?: { uid?: boolean },
+  ): Promise<unknown | false>;
+  append?(
+    path: string,
+    content: string | Buffer,
+    flags?: string[],
+    idate?: Date | string,
+  ): Promise<{ destination: string; uid?: number; seq?: number } | false>;
 };
 
 type ImapProviderClients = {
@@ -579,13 +607,39 @@ export class ImapProvider implements EmailProvider {
   }): Promise<{ status: number }> {
     this.unsupported("createAutoArchiveFilter");
   }
-  async createDraft(_params: {
+  async createDraft(params: {
     to: string;
     subject: string;
     messageHtml: string;
     replyToMessageId?: string;
   }): Promise<{ id: string }> {
-    this.unsupportedProviderStoredDrafts("createDraft");
+    return this.withClient(async (client) => {
+      const draftsMailbox = await this.findDraftsMailbox(client);
+      const draftId = createImapDraftId();
+      let originalMessage: ParsedMessage | null = null;
+
+      if (params.replyToMessageId) {
+        originalMessage = await this.getMessage(params.replyToMessageId).catch(
+          () => null,
+        );
+      }
+
+      await this.appendDraftMessage(client, draftsMailbox, {
+        draftId,
+        to: params.to,
+        from: this.settings.username,
+        subject: params.subject,
+        messageHtml: params.messageHtml,
+        replyToEmail: originalMessage
+          ? {
+              headerMessageId: originalMessage.headers["message-id"] || "",
+              references: originalMessage.headers.references,
+            }
+          : undefined,
+      });
+
+      return { id: draftId };
+    });
   }
   async createFilter(_options: {
     from: string;
@@ -597,8 +651,12 @@ export class ImapProvider implements EmailProvider {
   async createLabel(_name: string, _description?: string): Promise<EmailLabel> {
     this.unsupported("createLabel");
   }
-  async deleteDraft(_draftId: string): Promise<void> {
-    this.unsupportedProviderStoredDrafts("deleteDraft");
+  async deleteDraft(draftId: string): Promise<void> {
+    await this.withClient(async (client) => {
+      const draft = await this.findDraftById(client, draftId);
+      if (!draft) return;
+      await this.deleteDraftByUid(client, draft.mailbox, draft.uid);
+    });
   }
   async deleteFilter(_id: string): Promise<{ status: number }> {
     this.unsupported("deleteFilter");
@@ -607,8 +665,8 @@ export class ImapProvider implements EmailProvider {
     this.unsupported("deleteLabel");
   }
   async draftEmail(
-    _email: ParsedMessage,
-    _args: {
+    email: ParsedMessage,
+    args: {
       to?: string;
       subject?: string;
       content: string;
@@ -616,10 +674,27 @@ export class ImapProvider implements EmailProvider {
       bcc?: string;
       attachments?: MailAttachment[];
     },
-    _userEmail: string,
-    _executedRule?: { id: string; threadId: string; emailAccountId: string },
+    userEmail: string,
+    executedRule?: { id: string; threadId: string; emailAccountId: string },
   ): Promise<{ draftId: string }> {
-    this.unsupportedProviderStoredDrafts("draftEmail");
+    if (shouldSkipAutoDraft({ logger: this.logger, source: "imap" })) {
+      return { draftId: "" };
+    }
+
+    const createDraft = () => this.createReplyDraft(email, args, userEmail);
+
+    if (!executedRule) return createDraft();
+
+    const [result] = await Promise.all([
+      createDraft(),
+      handlePreviousDraftDeletion({
+        client: this,
+        executedRule,
+        logger: this.logger,
+      }),
+    ]);
+
+    return result;
   }
   async forwardEmail(
     email: ParsedMessage,
@@ -653,13 +728,31 @@ export class ImapProvider implements EmailProvider {
       this.smtpClients,
     );
   }
-  async getDraft(_draftId: string): Promise<ParsedMessage | null> {
-    this.unsupportedProviderStoredDrafts("getDraft");
+  async getDraft(draftId: string): Promise<ParsedMessage | null> {
+    return this.withClient(async (client) => {
+      const draft = await this.findDraftById(client, draftId);
+      if (!draft) return null;
+      return this.toDraftMessage(draft.message, draftId);
+    });
   }
-  async getDrafts(_options?: {
-    maxResults?: number;
-  }): Promise<ParsedMessage[]> {
-    this.unsupportedProviderStoredDrafts("getDrafts");
+  async getDrafts(options?: { maxResults?: number }): Promise<ParsedMessage[]> {
+    return this.withClient(async (client) => {
+      const draftsMailbox = await this.findDraftsMailbox(client);
+      const uids = await this.searchUids(client, draftsMailbox, { all: true });
+      const sortedUids = [...uids].sort((left, right) => right - left);
+      const messages = await this.fetchMessagesByUid(
+        client,
+        draftsMailbox,
+        sortedUids.slice(0, options?.maxResults),
+      );
+
+      return messages.map((message) =>
+        this.toDraftMessage(
+          message,
+          getDraftIdFromSource(message.id, message.headers["message-id"]),
+        ),
+      );
+    });
   }
   async getFiltersList(): Promise<EmailFilter[]> {
     this.unsupported("getFiltersList");
@@ -764,9 +857,34 @@ export class ImapProvider implements EmailProvider {
     );
   }
   async sendDraft(
-    _draftId: string,
+    draftId: string,
   ): Promise<{ messageId: string; threadId: string }> {
-    this.unsupportedProviderStoredDrafts("sendDraft");
+    const draft = await this.getDraft(draftId);
+    if (!draft) throw new Error(`IMAP draft not found: ${draftId}`);
+
+    const result = await sendSmtpEmailWithHtml(
+      this.settings,
+      {
+        to: draft.headers.to,
+        from: draft.headers.from || this.settings.username,
+        cc: draft.headers.cc,
+        bcc: draft.headers.bcc,
+        replyTo: draft.headers["reply-to"],
+        subject: draft.subject,
+        messageHtml: draft.textHtml || convertTextToHtml(draft.textPlain || ""),
+        replyToEmail: draft.headers["in-reply-to"]
+          ? {
+              threadId: draft.threadId,
+              headerMessageId: draft.headers["in-reply-to"],
+              references: draft.headers.references,
+            }
+          : undefined,
+      },
+      this.smtpClients,
+    );
+
+    await this.deleteDraft(draftId);
+    return result;
   }
   async sendEmail(args: {
     to: string;
@@ -825,10 +943,34 @@ export class ImapProvider implements EmailProvider {
     this.unsupported("unwatchEmails");
   }
   async updateDraft(
-    _draftId: string,
-    _params: { messageHtml?: string; subject?: string },
+    draftId: string,
+    params: { messageHtml?: string; subject?: string },
   ): Promise<void> {
-    this.unsupportedProviderStoredDrafts("updateDraft");
+    await this.withClient(async (client) => {
+      const currentDraft = await this.findDraftById(client, draftId);
+      if (!currentDraft) throw new Error(`IMAP draft not found: ${draftId}`);
+
+      await this.appendDraftMessage(client, currentDraft.mailbox, {
+        draftId,
+        to: currentDraft.message.headers.to,
+        from: currentDraft.message.headers.from || this.settings.username,
+        cc: currentDraft.message.headers.cc,
+        bcc: currentDraft.message.headers.bcc,
+        replyTo: currentDraft.message.headers["reply-to"],
+        subject: params.subject || currentDraft.message.subject,
+        messageHtml:
+          params.messageHtml ||
+          currentDraft.message.textHtml ||
+          convertTextToHtml(currentDraft.message.textPlain || ""),
+        inReplyTo: currentDraft.message.headers["in-reply-to"],
+        references: currentDraft.message.headers.references,
+      });
+      await this.deleteDraftByUid(
+        client,
+        currentDraft.mailbox,
+        currentDraft.uid,
+      );
+    });
   }
   async watchEmails(): Promise<{
     expirationDate: Date;
@@ -841,6 +983,137 @@ export class ImapProvider implements EmailProvider {
     return this.withClient((client) =>
       this.getMessagePageWithClient(client, options),
     );
+  }
+
+  private async createReplyDraft(
+    email: ParsedMessage,
+    args: {
+      to?: string;
+      subject?: string;
+      content: string;
+      cc?: string;
+      bcc?: string;
+      attachments?: MailAttachment[];
+    },
+    userEmail: string,
+  ) {
+    const recipients = buildReplyAllRecipients(
+      email.headers,
+      args.to,
+      userEmail,
+    );
+    const { html } = createReplyContent({
+      textContent: args.content,
+      message: email,
+    });
+    const draftId = createImapDraftId();
+
+    await this.withClient(async (client) => {
+      const draftsMailbox = await this.findDraftsMailbox(client);
+      await this.appendDraftMessage(client, draftsMailbox, {
+        draftId,
+        to: recipients.to,
+        from: this.settings.username,
+        cc: formatCcList(mergeAndDedupeRecipients(recipients.cc, args.cc)),
+        bcc: formatCcList(mergeAndDedupeRecipients([], args.bcc)),
+        subject: args.subject || formatReplySubject(email.headers.subject),
+        messageHtml: html,
+        messageText: buildReplyMessageText({
+          textContent: args.content,
+          message: email,
+        }),
+        attachments: args.attachments,
+        replyToEmail: {
+          headerMessageId: email.headers["message-id"] || "",
+          references: email.headers.references,
+        },
+      });
+    });
+
+    return { draftId };
+  }
+
+  private async appendDraftMessage(
+    client: ImapProviderClient,
+    draftsMailbox: string,
+    options: {
+      draftId: string;
+      to: string;
+      from?: string;
+      cc?: string;
+      bcc?: string;
+      replyTo?: string;
+      subject: string;
+      messageHtml: string;
+      messageText?: string;
+      attachments?: MailAttachment[];
+      replyToEmail?: { headerMessageId: string; references?: string };
+      inReplyTo?: string;
+      references?: string;
+    },
+  ) {
+    if (!client.append) {
+      throw new Error("IMAP provider cannot create drafts with this client.");
+    }
+
+    const source = await createDraftSource(options);
+    const result = await client.append(
+      draftsMailbox,
+      source,
+      ["\\Draft", "\\Seen"],
+      new Date(),
+    );
+    if (result === false) {
+      throw new Error(`IMAP draft append failed for ${draftsMailbox}.`);
+    }
+  }
+
+  private async findDraftById(client: ImapProviderClient, draftId: string) {
+    const draftsMailbox = await this.findDraftsMailbox(client);
+    const uids = await this.searchUids(client, draftsMailbox, {
+      or: [
+        { header: { [IMAP_DRAFT_ID_HEADER]: draftId } },
+        { header: { "message-id": `<${draftId}>` } },
+      ],
+    });
+    const uid = [...uids].sort((left, right) => right - left)[0];
+    if (!uid) return null;
+
+    return {
+      mailbox: draftsMailbox,
+      uid,
+      message: await this.fetchMessage(client, draftsMailbox, uid),
+    };
+  }
+
+  private async deleteDraftByUid(
+    client: ImapProviderClient,
+    mailbox: string,
+    uid: number,
+  ) {
+    if (!client.messageDelete) {
+      throw new Error("IMAP provider cannot delete drafts with this client.");
+    }
+
+    await this.withMailbox(
+      client,
+      mailbox,
+      async () => {
+        const result = await client.messageDelete?.([uid], { uid: true });
+        if (result === false) {
+          throw new Error(`IMAP draft delete failed for ${mailbox}.`);
+        }
+      },
+      { readOnly: false },
+    );
+  }
+
+  private toDraftMessage(message: ParsedMessage, draftId: string) {
+    return {
+      ...message,
+      id: draftId,
+      labelIds: [...(message.labelIds || []), "DRAFT"],
+    };
   }
 
   private async getOrCreateFolderIdByNameWithClient(
@@ -1187,6 +1460,15 @@ export class ImapProvider implements EmailProvider {
     );
   }
 
+  private async findDraftsMailbox(client: ImapProviderClient) {
+    return findMailboxBySpecialUseOrName(
+      await client.list(),
+      DRAFTS_SPECIAL_USE,
+      DRAFT_FOLDER_NAMES,
+      "Drafts",
+    );
+  }
+
   private async withMailbox<T>(
     client: ImapProviderClient,
     mailbox: string,
@@ -1239,12 +1521,6 @@ export class ImapProvider implements EmailProvider {
         client.close();
       }
     }
-  }
-
-  private unsupportedProviderStoredDrafts(method: string): never {
-    throw new Error(
-      `IMAP provider does not support ${method}: provider-stored drafts are not available for generic IMAP accounts.`,
-    );
   }
 
   private unsupported(method: string): never {
@@ -1392,6 +1668,81 @@ function sortMessagesOldestFirst(left: ParsedMessage, right: ParsedMessage) {
 
 function formatImapMessageId(mailbox: string, uid: number) {
   return `${encodeURIComponent(mailbox)}:${uid}`;
+}
+
+function createImapDraftId() {
+  return `iz-draft-${randomUUID()}@inbox-zero.local`;
+}
+
+async function createDraftSource(options: {
+  draftId: string;
+  to: string;
+  from?: string;
+  cc?: string;
+  bcc?: string;
+  replyTo?: string;
+  subject: string;
+  messageHtml: string;
+  messageText?: string;
+  attachments?: MailAttachment[];
+  replyToEmail?: { headerMessageId: string; references?: string };
+  inReplyTo?: string;
+  references?: string;
+}) {
+  const threadingHeaders = options.replyToEmail
+    ? buildThreadingHeaders(options.replyToEmail)
+    : {
+        inReplyTo: options.inReplyTo || "",
+        references: options.references || "",
+      };
+  const mailOptions: Mail.Options = {
+    from: options.from,
+    to: options.to,
+    cc: options.cc,
+    bcc: options.bcc,
+    replyTo: options.replyTo,
+    subject: options.subject,
+    text:
+      options.messageText ||
+      convertEmailHtmlToText({ htmlText: options.messageHtml }),
+    html: options.messageHtml,
+    attachments: options.attachments,
+    messageId: options.draftId,
+    inReplyTo: threadingHeaders.inReplyTo || undefined,
+    references: threadingHeaders.references || undefined,
+    headers: {
+      [IMAP_DRAFT_ID_HEADER]: options.draftId,
+      "X-Mailer": "Inbox Zero Web",
+    },
+  };
+
+  return new MailComposer(mailOptions).compile().build();
+}
+
+function getDraftIdFromSource(
+  messageId: string,
+  headerMessageId: string | undefined,
+) {
+  return headerMessageId || messageId;
+}
+
+function convertTextToHtml(text: string) {
+  return text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map(
+      (paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`,
+    )
+    .join("");
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function parseImapMessageId(messageId: string) {

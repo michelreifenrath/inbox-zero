@@ -3,6 +3,13 @@ import { STRATO_IMAP_PRESET } from "@/utils/email/imap-presets";
 import { ImapProvider, type ImapProviderClient } from "./provider";
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/env", () => ({
+  env: {
+    NEXT_PUBLIC_EMAIL_SEND_ENABLED: true,
+    NEXT_PUBLIC_AUTO_DRAFT_DISABLED: false,
+    NODE_ENV: "test",
+  },
+}));
 
 type StoredMessage = {
   uid: number;
@@ -687,26 +694,145 @@ describe("ImapProvider", () => {
     });
   });
 
-  it("throws explicit errors for unsupported provider-stored draft operations", async () => {
+  it("creates, reads, updates, lists, and deletes IMAP drafts in the Drafts folder with stable IDs", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        {
+          path: "Drafts",
+          name: "Drafts",
+          delimiter: "/",
+          specialUse: "\\Drafts",
+        },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+      },
+    });
     const provider = new ImapProvider(settings, undefined, {
-      createClient: () => new MockImapClient(),
+      createClient: () => client,
     });
 
-    await expect(
-      provider.createDraft({
-        to: "to@example.com",
-        subject: "Draft",
-        messageHtml: "<p>Body</p>",
+    const { id: draftId } = await provider.createDraft({
+      to: "recipient@example.com",
+      subject: "Re: Root",
+      messageHtml: "<p>Initial body</p>",
+      replyToMessageId: "INBOX:1",
+    });
+
+    expect(draftId).toMatch(/^iz-draft-/);
+    expect(client.messages.Drafts).toHaveLength(1);
+    expect(client.messages.Drafts?.[0]?.flags?.has("\\Draft")).toBe(true);
+
+    const initialDraft = await provider.getDraft(draftId);
+    expect(initialDraft).toMatchObject({
+      id: draftId,
+      subject: "Re: Root",
+      parentFolderId: "Drafts",
+      threadId: "root@example.com",
+    });
+    expect(initialDraft?.headers["in-reply-to"]).toBe("root@example.com");
+    expect(initialDraft?.textHtml).toContain("Initial body");
+
+    await provider.updateDraft(draftId, {
+      subject: "Re: Root updated",
+      messageHtml: "<p>Updated body</p>",
+    });
+
+    const updatedDraft = await provider.getDraft(draftId);
+    expect(updatedDraft).toMatchObject({
+      id: draftId,
+      subject: "Re: Root updated",
+      threadId: "root@example.com",
+    });
+    expect(updatedDraft?.textHtml).toContain("Updated body");
+    expect(client.messages.Drafts).toHaveLength(1);
+
+    await expect(provider.getDrafts()).resolves.toEqual([
+      expect.objectContaining({ id: draftId, subject: "Re: Root updated" }),
+    ]);
+
+    await provider.deleteDraft(draftId);
+
+    await expect(provider.getDraft(draftId)).resolves.toBeNull();
+    expect(client.messages.Drafts).toEqual([]);
+  });
+
+  it("sends IMAP drafts with SMTP threading and deletes them only after successful send", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        {
+          path: "Drafts",
+          name: "Drafts",
+          delimiter: "/",
+          specialUse: "\\Drafts",
+        },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+      },
+    });
+    const sendMail = vi
+      .fn()
+      .mockResolvedValue({ messageId: "<sent@example.com>" });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+      createSmtpTransport: () => ({ sendMail }),
+    });
+    const { id: draftId } = await provider.createDraft({
+      to: "recipient@example.com",
+      subject: "Re: Root",
+      messageHtml: "<p>Ready to send</p>",
+      replyToMessageId: "INBOX:1",
+    });
+
+    await expect(provider.sendDraft(draftId)).resolves.toEqual({
+      messageId: "",
+      threadId: "root@example.com",
+    });
+
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "recipient@example.com",
+        subject: "Re: Root",
+        inReplyTo: "<root@example.com>",
+        references: "<root@example.com> <root@example.com>",
+        headers: expect.objectContaining({ "X-Mailer": "Inbox Zero Web" }),
       }),
-    ).rejects.toThrow(
-      "IMAP provider does not support createDraft: provider-stored drafts are not available for generic IMAP accounts.",
     );
-    await expect(provider.sendDraft("draft-1")).rejects.toThrow(
-      "IMAP provider does not support sendDraft: provider-stored drafts are not available for generic IMAP accounts.",
+    expect(client.messages.Drafts).toEqual([]);
+
+    const { id: failedDraftId } = await provider.createDraft({
+      to: "recipient@example.com",
+      subject: "Re: Root failed",
+      messageHtml: "<p>Do not delete yet</p>",
+      replyToMessageId: "INBOX:1",
+    });
+    sendMail.mockRejectedValueOnce(new Error("SMTP down"));
+
+    await expect(provider.sendDraft(failedDraftId)).rejects.toThrow(
+      "Email could not be sent. Try again later.",
     );
-    await expect(provider.getDrafts()).rejects.toThrow(
-      "IMAP provider does not support getDrafts: provider-stored drafts are not available for generic IMAP accounts.",
-    );
+    expect(client.messages.Drafts).toHaveLength(1);
+    await expect(provider.getDraft(failedDraftId)).resolves.toMatchObject({
+      id: failedDraftId,
+      subject: "Re: Root failed",
+    });
   });
 });
 
@@ -847,6 +973,27 @@ class MockImapClient implements ImapProviderClient {
     ];
 
     return true;
+  }
+
+  async messageDelete(range: number[]) {
+    const uidSet = new Set(range);
+    this.messages[this.currentMailbox] = (
+      this.messages[this.currentMailbox] || []
+    ).filter((message) => !uidSet.has(message.uid));
+    return true;
+  }
+
+  async append(path: string, content: string | Buffer, flags: string[] = []) {
+    const messages = this.messages[path] || [];
+    this.messages[path] = messages;
+    const uid = Math.max(0, ...messages.map((message) => message.uid)) + 1;
+    messages.push({
+      uid,
+      source: Buffer.isBuffer(content) ? content : Buffer.from(content),
+      flags: new Set(flags),
+      internalDate: new Date(),
+    });
+    return { destination: path, uid };
   }
 
   async messageFlagsAdd(range: number[], flags: string[]) {
