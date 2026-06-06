@@ -68,6 +68,15 @@ describe("getAvailableActionsForRuleEditor", () => {
     expect(actions).not.toContain(ActionType.DRAFT_MESSAGING_CHANNEL);
   });
 
+  it("keeps folder-backed rule actions Microsoft-only", () => {
+    expect(
+      getAvailableActionsForRuleEditor({ provider: "google" }),
+    ).not.toContain(ActionType.MOVE_FOLDER);
+    expect(
+      getAvailableActionsForRuleEditor({ provider: "microsoft" }),
+    ).toContain(ActionType.MOVE_FOLDER);
+  });
+
   it("keeps IMAP rules to SMTP send actions", () => {
     const actions = getAvailableActionsForRuleEditor({
       provider: "imap",

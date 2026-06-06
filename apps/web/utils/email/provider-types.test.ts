@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { ActionType } from "@/generated/prisma/enums";
 import {
+  getProviderCapabilities,
   isGoogleProvider,
   isImapProvider,
   isMicrosoftProvider,
   isOAuthProvider,
   supportsBulkSenderActions,
+  supportsProviderCapability,
+  supportsProviderRuleAction,
   supportsProviderSignatureLookup,
   supportsProviderStoredDrafts,
   supportsProviderWriteActions,
@@ -55,5 +59,82 @@ describe("email provider identity helpers", () => {
     expect(supportsProviderSignatureLookup("imap")).toBe(false);
     expect(supportsProviderWriteActions("imap")).toBe(false);
     expect(supportsBulkSenderActions("imap")).toBe(false);
+  });
+
+  it("exposes granular provider capabilities for OAuth providers and IMAP", () => {
+    expect(getProviderCapabilities("google")).toMatchObject({
+      mailboxArchive: true,
+      mailboxTrash: true,
+      mailboxMarkRead: true,
+      mailboxMarkUnread: true,
+      mailboxStar: true,
+      mailboxSpam: true,
+      folderMove: false,
+      folderCreate: false,
+      labelActions: true,
+      providerStoredDrafts: true,
+      providerNativeFilters: true,
+      bulkSenderActions: true,
+      providerSignatureLookup: true,
+    });
+    expect(getProviderCapabilities("microsoft")).toMatchObject({
+      mailboxArchive: true,
+      mailboxTrash: true,
+      mailboxMarkRead: true,
+      mailboxMarkUnread: true,
+      mailboxStar: true,
+      mailboxSpam: true,
+      folderMove: true,
+      folderCreate: true,
+      labelActions: true,
+      providerStoredDrafts: true,
+      providerNativeFilters: true,
+      bulkSenderActions: true,
+      providerSignatureLookup: true,
+    });
+    expect(getProviderCapabilities("imap")).toMatchObject({
+      mailboxArchive: false,
+      mailboxTrash: false,
+      mailboxMarkRead: false,
+      mailboxMarkUnread: false,
+      mailboxStar: false,
+      mailboxSpam: false,
+      folderMove: false,
+      folderCreate: false,
+      labelActions: false,
+      providerStoredDrafts: false,
+      providerNativeFilters: false,
+      bulkSenderActions: false,
+      providerSignatureLookup: false,
+    });
+  });
+
+  it("checks rule actions against granular provider capabilities", () => {
+    expect(supportsProviderRuleAction("google", ActionType.LABEL)).toBe(true);
+    expect(supportsProviderRuleAction("google", ActionType.MOVE_FOLDER)).toBe(
+      false,
+    );
+    expect(
+      supportsProviderRuleAction("microsoft", ActionType.MOVE_FOLDER),
+    ).toBe(true);
+    expect(supportsProviderRuleAction("imap", ActionType.LABEL)).toBe(false);
+    expect(supportsProviderRuleAction("google", ActionType.DRAFT_EMAIL)).toBe(
+      true,
+    );
+    expect(
+      supportsProviderRuleAction("google", ActionType.DRAFT_MESSAGING_CHANNEL),
+    ).toBe(true);
+    expect(supportsProviderRuleAction("imap", ActionType.DRAFT_EMAIL)).toBe(
+      false,
+    );
+    expect(
+      supportsProviderRuleAction("imap", ActionType.DRAFT_MESSAGING_CHANNEL),
+    ).toBe(false);
+    expect(supportsProviderRuleAction("imap", ActionType.SEND_EMAIL)).toBe(
+      true,
+    );
+    expect(supportsProviderCapability("imap", "providerNativeFilters")).toBe(
+      false,
+    );
   });
 });
