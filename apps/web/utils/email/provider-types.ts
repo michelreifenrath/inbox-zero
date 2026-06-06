@@ -45,7 +45,7 @@ const PROVIDER_CAPABILITIES = {
     folderMove: true,
     folderCreate: true,
     labelActions: false,
-    providerStoredDrafts: false,
+    providerStoredDrafts: true,
     providerNativeFilters: false,
     bulkSenderActions: false,
     providerSignatureLookup: false,
