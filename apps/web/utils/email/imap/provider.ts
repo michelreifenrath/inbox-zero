@@ -859,32 +859,47 @@ export class ImapProvider implements EmailProvider {
   async sendDraft(
     draftId: string,
   ): Promise<{ messageId: string; threadId: string }> {
-    const draft = await this.getDraft(draftId);
-    if (!draft) throw new Error(`IMAP draft not found: ${draftId}`);
+    return this.withClient(async (client) => {
+      const draft = await this.findDraftById(client, draftId);
+      if (!draft) throw new Error(`IMAP draft not found: ${draftId}`);
 
-    const result = await sendSmtpEmailWithHtml(
-      this.settings,
-      {
-        to: draft.headers.to,
-        from: draft.headers.from || this.settings.username,
-        cc: draft.headers.cc,
-        bcc: draft.headers.bcc,
-        replyTo: draft.headers["reply-to"],
-        subject: draft.subject,
-        messageHtml: draft.textHtml || convertTextToHtml(draft.textPlain || ""),
-        replyToEmail: draft.headers["in-reply-to"]
-          ? {
-              threadId: draft.threadId,
-              headerMessageId: draft.headers["in-reply-to"],
-              references: draft.headers.references,
-            }
-          : undefined,
-      },
-      this.smtpClients,
-    );
+      const attachments = await this.getStoredDraftAttachments(
+        client,
+        draft.mailbox,
+        draft.uid,
+        draft.message.attachments,
+      );
+      const inReplyTo = draft.message.headers["in-reply-to"];
+      const result = await sendSmtpEmailWithHtml(
+        this.settings,
+        {
+          to: draft.message.headers.to,
+          from: draft.message.headers.from || this.settings.username,
+          cc: draft.message.headers.cc,
+          bcc: draft.message.headers.bcc,
+          replyTo: draft.message.headers["reply-to"],
+          subject: draft.message.subject,
+          messageHtml:
+            draft.message.textHtml ||
+            convertTextToHtml(draft.message.textPlain || ""),
+          attachments,
+          replyToEmail: inReplyTo
+            ? {
+                threadId: draft.message.threadId,
+                headerMessageId: inReplyTo,
+                references: removeReferenceId(
+                  draft.message.headers.references,
+                  inReplyTo,
+                ),
+              }
+            : undefined,
+        },
+        this.smtpClients,
+      );
 
-    await this.deleteDraft(draftId);
-    return result;
+      await this.deleteDraftByUid(client, draft.mailbox, draft.uid);
+      return result;
+    });
   }
   async sendEmail(args: {
     to: string;
@@ -1105,6 +1120,30 @@ export class ImapProvider implements EmailProvider {
         }
       },
       { readOnly: false },
+    );
+  }
+
+  private async getStoredDraftAttachments(
+    client: ImapProviderClient,
+    mailbox: string,
+    uid: number,
+    attachments: ParsedMessage["attachments"],
+  ): Promise<MailAttachment[] | undefined> {
+    if (!attachments?.length) return;
+
+    const raw = await this.fetchRawMessage(client, mailbox, uid);
+    return Promise.all(
+      attachments.map(async (attachment) => {
+        const attachmentData = await parseImapAttachment(
+          raw.source,
+          attachment.attachmentId,
+        );
+        return {
+          content: Buffer.from(attachmentData.data, "base64"),
+          contentType: attachment.mimeType,
+          filename: attachment.filename,
+        };
+      }),
     );
   }
 
@@ -1724,6 +1763,20 @@ function getDraftIdFromSource(
   headerMessageId: string | undefined,
 ) {
   return headerMessageId || messageId;
+}
+
+function removeReferenceId(references: string | undefined, messageId: string) {
+  const normalizedMessageId = normalizeMessageId(messageId);
+  if (!references || !normalizedMessageId) return references;
+
+  return references
+    .split(/\s+/)
+    .map((reference) => reference.trim())
+    .filter(Boolean)
+    .filter(
+      (reference) => normalizeMessageId(reference) !== normalizedMessageId,
+    )
+    .join(" ");
 }
 
 function convertTextToHtml(text: string) {

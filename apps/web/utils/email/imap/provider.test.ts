@@ -811,7 +811,7 @@ describe("ImapProvider", () => {
         to: "recipient@example.com",
         subject: "Re: Root",
         inReplyTo: "<root@example.com>",
-        references: "<root@example.com> <root@example.com>",
+        references: "<root@example.com>",
         headers: expect.objectContaining({ "X-Mailer": "Inbox Zero Web" }),
       }),
     );
@@ -833,6 +833,68 @@ describe("ImapProvider", () => {
       id: failedDraftId,
       subject: "Re: Root failed",
     });
+  });
+
+  it("sends stored IMAP draft attachments through SMTP", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        {
+          path: "Drafts",
+          name: "Drafts",
+          delimiter: "/",
+          specialUse: "\\Drafts",
+        },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+      },
+    });
+    const sendMail = vi
+      .fn()
+      .mockResolvedValue({ messageId: "<sent@example.com>" });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+      createSmtpTransport: () => ({ sendMail }),
+    });
+
+    const originalMessage = await provider.getMessage("INBOX:1");
+    const { draftId } = await provider.draftEmail(
+      originalMessage,
+      {
+        content: "Draft with attachment",
+        attachments: [
+          {
+            filename: "report.csv",
+            content: Buffer.from("a,b,c"),
+            contentType: "text/csv",
+          },
+        ],
+      },
+      settings.username,
+    );
+
+    await provider.sendDraft(draftId);
+
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            filename: "report.csv",
+            contentType: "text/csv",
+            content: Buffer.from("a,b,c"),
+          }),
+        ],
+      }),
+    );
+    expect(client.messages.Drafts).toEqual([]);
   });
 });
 
