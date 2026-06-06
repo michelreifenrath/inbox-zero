@@ -225,6 +225,27 @@ export const hasAiAccess = (
   return hasAiAccess;
 };
 
+export function getAiReadiness({
+  hasAiApiKey,
+  hasDeploymentAiConfiguration,
+}: {
+  aiProvider?: string | null;
+  hasAiApiKey?: boolean | null;
+  hasDeploymentAiConfiguration?: boolean | null;
+}) {
+  const hasUserAiConfiguration = Boolean(hasAiApiKey);
+  const hasAiConfiguration = Boolean(
+    hasDeploymentAiConfiguration || hasUserAiConfiguration,
+  );
+
+  return {
+    hasAiConfiguration,
+    hasUserAiConfiguration,
+    hasDeploymentAiConfiguration: Boolean(hasDeploymentAiConfiguration),
+    needsAiConfiguration: !hasAiConfiguration,
+  };
+}
+
 export const hasTierAccess = ({
   tier,
   minimumTier,

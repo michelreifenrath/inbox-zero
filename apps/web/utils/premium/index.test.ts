@@ -11,6 +11,7 @@ vi.mock("@/env", () => ({
 }));
 
 import {
+  getAiReadiness,
   getPremiumUserFilter,
   getUserTier,
   hasActiveAppleSubscription,
@@ -157,6 +158,68 @@ describe("Apple premium helpers", () => {
         tier: null,
       }),
     ).toBe(false);
+  });
+});
+
+describe("AI readiness", () => {
+  it("reports missing AI configuration without a deployment model or user key", () => {
+    expect(
+      getAiReadiness({
+        aiProvider: null,
+        hasAiApiKey: false,
+        hasDeploymentAiConfiguration: false,
+      }),
+    ).toMatchObject({
+      hasAiConfiguration: false,
+      hasUserAiConfiguration: false,
+      hasDeploymentAiConfiguration: false,
+      needsAiConfiguration: true,
+    });
+  });
+
+  it("reports AI configuration ready when the user configured a provider and key", () => {
+    expect(
+      getAiReadiness({
+        aiProvider: "openai",
+        hasAiApiKey: true,
+        hasDeploymentAiConfiguration: false,
+      }),
+    ).toMatchObject({
+      hasAiConfiguration: true,
+      hasUserAiConfiguration: true,
+      hasDeploymentAiConfiguration: false,
+      needsAiConfiguration: false,
+    });
+  });
+
+  it("reports AI configuration ready when the user configured a key without a provider", () => {
+    expect(
+      getAiReadiness({
+        aiProvider: null,
+        hasAiApiKey: true,
+        hasDeploymentAiConfiguration: false,
+      }),
+    ).toMatchObject({
+      hasAiConfiguration: true,
+      hasUserAiConfiguration: true,
+      hasDeploymentAiConfiguration: false,
+      needsAiConfiguration: false,
+    });
+  });
+
+  it("reports AI configuration ready when a deployment model is configured", () => {
+    expect(
+      getAiReadiness({
+        aiProvider: null,
+        hasAiApiKey: false,
+        hasDeploymentAiConfiguration: true,
+      }),
+    ).toMatchObject({
+      hasAiConfiguration: true,
+      hasUserAiConfiguration: false,
+      hasDeploymentAiConfiguration: true,
+      needsAiConfiguration: false,
+    });
   });
 });
 

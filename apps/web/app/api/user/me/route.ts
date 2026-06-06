@@ -3,7 +3,8 @@ import prisma from "@/utils/prisma";
 import { withError } from "@/utils/middleware";
 import { SafeError } from "@/utils/error";
 import { auth } from "@/utils/auth";
-import { premiumEntitlementSelect } from "@/utils/premium";
+import { getAiReadiness, premiumEntitlementSelect } from "@/utils/premium";
+import { getResolvedDeploymentRolePrimaryModelEntry } from "@/utils/llms/model";
 
 export type UserResponse = Awaited<ReturnType<typeof getUser>> | null;
 
@@ -71,6 +72,8 @@ async function getUser({
   );
 
   const { aiApiKey, webhookSecret, emailAccounts } = user;
+  const deploymentAiModel =
+    getResolvedDeploymentRolePrimaryModelEntry("default");
 
   return {
     id: user.id,
@@ -85,6 +88,11 @@ async function getUser({
     })),
     hasAiApiKey: !!aiApiKey,
     hasWebhookSecret: !!webhookSecret,
+    aiReadiness: getAiReadiness({
+      aiProvider: user.aiProvider,
+      hasAiApiKey: !!aiApiKey,
+      hasDeploymentAiConfiguration: !!deploymentAiModel,
+    }),
     members,
   };
 }

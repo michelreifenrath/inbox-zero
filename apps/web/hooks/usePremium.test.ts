@@ -103,4 +103,52 @@ describe("usePremium", () => {
     expect(result.current.tier).toBe("STARTER_MONTHLY");
     expect(result.current.hasAiAccess).toBe(true);
   });
+
+  it("reports missing AI configuration when neither deployment nor user AI access is configured", () => {
+    mockUseUser.mockReturnValue({
+      data: {
+        premium: null,
+        aiProvider: null,
+        hasAiApiKey: false,
+        aiReadiness: {
+          hasAiConfiguration: false,
+          hasUserAiConfiguration: false,
+          hasDeploymentAiConfiguration: false,
+          needsAiConfiguration: true,
+        },
+      },
+      error: undefined,
+      isLoading: false,
+      mutate: vi.fn(),
+    });
+
+    const { result } = renderHook(() => usePremium());
+
+    expect(result.current.hasAiConfiguration).toBe(false);
+    expect(result.current.needsAiConfiguration).toBe(true);
+  });
+
+  it("reports present AI configuration when the user has a provider and key", () => {
+    mockUseUser.mockReturnValue({
+      data: {
+        premium: null,
+        aiProvider: "openai",
+        hasAiApiKey: true,
+        aiReadiness: {
+          hasAiConfiguration: true,
+          hasUserAiConfiguration: true,
+          hasDeploymentAiConfiguration: false,
+          needsAiConfiguration: false,
+        },
+      },
+      error: undefined,
+      isLoading: false,
+      mutate: vi.fn(),
+    });
+
+    const { result } = renderHook(() => usePremium());
+
+    expect(result.current.hasAiConfiguration).toBe(true);
+    expect(result.current.needsAiConfiguration).toBe(false);
+  });
 });

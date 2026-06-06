@@ -88,18 +88,56 @@ describe("GET /api/user/setup-progress", () => {
       showCalendarStep: true,
     });
   });
+
+  it("reports missing AI readiness without a configured user provider and key", async () => {
+    prisma.emailAccount.findUnique.mockResolvedValue(
+      createEmailAccount({ calendarConnections: [] }),
+    );
+
+    const response = await GET(createRequest());
+    const body = await response.json();
+
+    expect(body.aiReadiness).toMatchObject({
+      hasAiConfiguration: false,
+      hasUserAiConfiguration: false,
+      hasDeploymentAiConfiguration: false,
+      needsAiConfiguration: true,
+    });
+  });
+
+  it("reports present AI readiness without exposing the stored key", async () => {
+    prisma.emailAccount.findUnique.mockResolvedValue(
+      createEmailAccount({
+        calendarConnections: [],
+        user: { aiProvider: "openai", aiApiKey: "stored-api-key" },
+      }),
+    );
+
+    const response = await GET(createRequest());
+    const body = await response.json();
+
+    expect(body.aiReadiness).toMatchObject({
+      hasAiConfiguration: true,
+      hasUserAiConfiguration: true,
+      hasDeploymentAiConfiguration: false,
+      needsAiConfiguration: false,
+    });
+    expect(JSON.stringify(body)).not.toContain("stored-api-key");
+  });
 });
 
 function createEmailAccount({
   calendarConnections,
+  user = { aiProvider: null, aiApiKey: null },
 }: {
   calendarConnections: { id: string }[];
+  user?: { aiProvider: string | null; aiApiKey: string | null };
 }) {
   return {
     rules: [],
     newsletters: [],
     calendarConnections,
-    user: { dismissedHints: [] },
+    user: { ...user, dismissedHints: [] },
     members: [
       {
         role: "member",
