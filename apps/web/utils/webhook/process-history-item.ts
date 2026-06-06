@@ -14,7 +14,11 @@ import {
 import { handleOutboundMessage } from "@/utils/reply-tracker/handle-outbound";
 import { cleanupThreadAIDrafts } from "@/utils/reply-tracker/draft-tracking";
 import { clearFollowUpLabel } from "@/utils/follow-up/labels";
-import { NewsletterStatus } from "@/generated/prisma/enums";
+import {
+  ActionType,
+  ExecutedRuleStatus,
+  NewsletterStatus,
+} from "@/generated/prisma/enums";
 import type { EmailAccount } from "@/generated/prisma/client";
 import { extractEmailAddress, extractNameFromEmail } from "@/utils/email";
 import { isIgnoredSender } from "@/utils/filter-ignored-senders";
@@ -25,6 +29,9 @@ import type { Logger } from "@/utils/logger";
 import { runWithBackgroundLoggerFlush } from "@/utils/logger-flush";
 import { captureException } from "@/utils/error";
 import { logErrorWithDedupe } from "@/utils/log-error-with-dedupe";
+import { matchesStaticRule } from "@/utils/ai/choose-rule/match-rules";
+import { executeAct } from "@/utils/ai/choose-rule/execute";
+import { sanitizeActionFields } from "@/utils/action-item";
 
 export type SharedProcessHistoryOptions = {
   provider: EmailProvider;
@@ -163,7 +170,17 @@ export async function processHistoryItem(
     }
 
     if (!hasAiAccess) {
-      logger.info("Skipping. No AI access.");
+      if (provider.name === "imap" && !hasExistingRule && hasAutomationRules) {
+        await runStaticSenderCleanupRules({
+          provider,
+          rules,
+          emailAccount,
+          message: parsedMessage,
+          logger,
+        });
+      }
+
+      logger.info("Skipping AI-only processing. No AI access.");
       return;
     }
 
@@ -191,7 +208,7 @@ export async function processHistoryItem(
 
     logger.info("Pre-rules check", { hasAutomationRules, hasAiAccess });
 
-    if (!hasExistingRule && hasAutomationRules && hasAiAccess) {
+    if (!hasExistingRule && hasAutomationRules) {
       logger.info("Running rules...");
 
       await runRules({
@@ -324,4 +341,72 @@ export async function processHistoryItem(
     });
     throw error;
   }
+}
+
+async function runStaticSenderCleanupRules({
+  provider,
+  rules,
+  emailAccount,
+  message,
+  logger,
+}: {
+  provider: EmailProvider;
+  rules: RuleWithActions[];
+  emailAccount: EmailAccountForDrafting & Pick<EmailAccount, "email">;
+  message: ParsedMessage;
+  logger: Logger;
+}) {
+  const isThread = provider.isReplyInThread(message);
+
+  for (const rule of rules.filter(isStaticSenderCleanupRule)) {
+    if (isThread && !rule.runOnThreads) continue;
+    if (!matchesStaticRule(rule, message, logger)) continue;
+
+    const executedRule = await prisma.executedRule.create({
+      data: {
+        actionItems: {
+          createMany: {
+            data: rule.actions.map((action) => sanitizeActionFields(action)),
+          },
+        },
+        messageId: message.id,
+        threadId: message.threadId,
+        automated: true,
+        status: ExecutedRuleStatus.APPLYING,
+        reason: "Matched static sender cleanup rule",
+        rule: { connect: { id: rule.id } },
+        emailAccount: { connect: { id: emailAccount.id } },
+      },
+      include: { actionItems: true },
+    });
+
+    await executeAct({
+      client: provider,
+      emailAccount: {
+        email: emailAccount.email,
+        id: emailAccount.id,
+        userId: emailAccount.userId,
+      },
+      executedRule,
+      message,
+      logger,
+    });
+  }
+}
+
+function isStaticSenderCleanupRule(rule: RuleWithActions) {
+  return (
+    !!rule.from &&
+    !rule.to &&
+    !rule.subject &&
+    !rule.body &&
+    !rule.instructions &&
+    !rule.groupId &&
+    rule.actions.length > 0 &&
+    rule.actions.every(
+      (action) =>
+        action.type === ActionType.ARCHIVE ||
+        action.type === ActionType.MOVE_FOLDER,
+    )
+  );
 }

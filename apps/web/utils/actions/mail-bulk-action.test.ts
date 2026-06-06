@@ -11,6 +11,7 @@ import {
   bulkTrashAction,
 } from "@/utils/actions/mail-bulk-action";
 import { ActionType } from "@/generated/prisma/enums";
+import { getAutoArchiveFilters } from "@/app/api/user/stats/newsletters/helpers";
 
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/auth", () => ({
@@ -310,5 +311,20 @@ describe("bulkArchiveAction", () => {
       addLabelIds: ["label-123"],
     });
     expect(prisma.rule.upsert).not.toHaveBeenCalled();
+  });
+
+  it("does not list native auto-archive filters for IMAP providers", async () => {
+    const getFiltersList = vi.fn();
+
+    const filters = await getAutoArchiveFilters(
+      {
+        name: "imap",
+        getFiltersList,
+      } as any,
+      { error: vi.fn() } as any,
+    );
+
+    expect(filters).toEqual([]);
+    expect(getFiltersList).not.toHaveBeenCalled();
   });
 });

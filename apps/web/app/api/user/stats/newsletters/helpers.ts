@@ -4,11 +4,14 @@ import prisma from "@/utils/prisma";
 import { NewsletterStatus } from "@/generated/prisma/enums";
 import { GmailLabel } from "@/utils/gmail/label";
 import type { Logger } from "@/utils/logger";
+import { supportsProviderNativeFilters } from "@/utils/email/provider-types";
 
 export async function getAutoArchiveFilters(
   emailProvider: EmailProvider,
   logger: Logger,
 ) {
+  if (!supportsProviderNativeFilters(emailProvider.name)) return [];
+
   try {
     const filters = await emailProvider.getFiltersList();
 
