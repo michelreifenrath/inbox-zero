@@ -81,7 +81,7 @@ describe("getAvailableActionsForRuleEditor", () => {
     );
   });
 
-  it("exposes only implemented IMAP rule actions plus SMTP send actions", () => {
+  it("exposes implemented IMAP rule actions, provider-stored drafts, and SMTP send actions", () => {
     const actions = getAvailableActionsForRuleEditor({
       provider: "imap",
     });
@@ -91,6 +91,7 @@ describe("getAvailableActionsForRuleEditor", () => {
       ActionType.ARCHIVE,
       ActionType.MARK_READ,
       ActionType.STAR,
+      ActionType.DRAFT_EMAIL,
       ActionType.REPLY,
       ActionType.FORWARD,
       ActionType.SEND_EMAIL,
@@ -105,11 +106,12 @@ describe("getDefaultActions", () => {
     mockEnv.webhookActionsEnabled = true;
   });
 
-  it("omits default draft replies for IMAP accounts", () => {
+  it("includes default draft replies for IMAP accounts", () => {
     const actions = getDefaultActions(SystemType.TO_REPLY, "imap");
 
     expect(actions.map((action) => action.type)).toEqual([
       ActionType.MOVE_FOLDER,
+      ActionType.DRAFT_EMAIL,
     ]);
   });
 
