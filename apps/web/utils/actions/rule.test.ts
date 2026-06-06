@@ -40,6 +40,7 @@ import {
   importRulesAction,
   updateRuleAction,
 } from "@/utils/actions/rule";
+import { updateRule } from "@/utils/rule/rule";
 
 describe("enableDraftRepliesAction", () => {
   beforeEach(() => {
@@ -281,6 +282,76 @@ describe("updateRuleAction", () => {
     expect(result?.serverError).toContain("isn't supported for IMAP accounts");
     expect(createEmailProviderMock).not.toHaveBeenCalled();
     expect(prisma.rule.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateRule", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.rule.findMany.mockResolvedValue([]);
+  });
+
+  it("resolves and persists IMAP move folder fields", async () => {
+    (prisma.rule.update as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "rule-1",
+      actions: [],
+      group: null,
+    });
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getOrCreateFolderIdByName: vi.fn(
+        async (folderName: string) => `imap-folder-${folderName}`,
+      ),
+    } as any);
+
+    await updateRule({
+      ruleId: "rule-1",
+      emailAccountId: "account-1",
+      provider: "imap",
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+      } as any,
+      result: {
+        name: "Finance",
+        condition: {
+          aiInstructions: "Move finance emails",
+          conditionalOperator: null,
+          static: {
+            from: null,
+            to: null,
+            subject: null,
+          },
+        },
+        actions: [
+          {
+            type: ActionType.MOVE_FOLDER,
+            fields: {
+              folderName: "Finance",
+            },
+            delayInMinutes: null,
+          },
+        ],
+      },
+    });
+
+    expect(prisma.rule.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          actions: {
+            deleteMany: {},
+            createMany: {
+              data: [
+                expect.objectContaining({
+                  type: ActionType.MOVE_FOLDER,
+                  folderName: "Finance",
+                  folderId: "imap-folder-Finance",
+                }),
+              ],
+            },
+          },
+        }),
+      }),
+    );
   });
 });
 

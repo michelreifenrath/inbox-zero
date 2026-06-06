@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ActionType } from "@/generated/prisma/enums";
+import { ActionType, SystemType } from "@/generated/prisma/enums";
 import {
   getAvailableActionsForRuleEditor,
   getExtraAvailableActionsForRuleEditor,
 } from "./action-availability";
+import { getDefaultActions } from "@/utils/rule/consts";
 
 const { mockEnv } = vi.hoisted(() => ({
   mockEnv: {
@@ -94,6 +95,30 @@ describe("getAvailableActionsForRuleEditor", () => {
       ActionType.FORWARD,
       ActionType.SEND_EMAIL,
     ]);
+  });
+});
+
+describe("getDefaultActions", () => {
+  beforeEach(() => {
+    mockEnv.emailSendEnabled = true;
+    mockEnv.autoDraftDisabled = false;
+    mockEnv.webhookActionsEnabled = true;
+  });
+
+  it("omits default draft replies for IMAP accounts", () => {
+    const actions = getDefaultActions(SystemType.TO_REPLY, "imap");
+
+    expect(actions.map((action) => action.type)).toEqual([
+      ActionType.MOVE_FOLDER,
+    ]);
+  });
+
+  it("keeps default draft replies for providers with stored drafts", () => {
+    const actions = getDefaultActions(SystemType.TO_REPLY, "google");
+
+    expect(actions.map((action) => action.type)).toContain(
+      ActionType.DRAFT_EMAIL,
+    );
   });
 });
 

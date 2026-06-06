@@ -292,7 +292,11 @@ export function getDefaultActions(
     });
   }
 
-  if (config.draftReply && !env.NEXT_PUBLIC_AUTO_DRAFT_DISABLED) {
+  if (
+    config.draftReply &&
+    !env.NEXT_PUBLIC_AUTO_DRAFT_DISABLED &&
+    supportsProviderStoredDrafts(provider)
+  ) {
     actions.push({
       id: `placeholder-action-draft-${systemType}`,
       type: ActionType.DRAFT_EMAIL,
