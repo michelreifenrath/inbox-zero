@@ -13,7 +13,7 @@ describe("shouldRunEvalTests", () => {
 
     expect(getEvalModels()).toEqual([
       {
-        provider: "openai-compatible",
+        provider: "azure-foundry",
         model: "DeepSeek-V4-Pro",
         label: "DeepSeek V4 Pro Azure",
         includeInAll: false,
@@ -24,7 +24,7 @@ describe("shouldRunEvalTests", () => {
 
     expect(getEvalModels()).toEqual([
       {
-        provider: "openai-compatible",
+        provider: "azure-foundry",
         model: "DeepSeek-V4-Flash",
         label: "DeepSeek V4 Flash Azure",
         includeInAll: false,
@@ -60,7 +60,7 @@ describe("shouldRunEvalTests", () => {
   it("uses the default provider when no eval matrix is specified", () => {
     process.env.RUN_AI_TESTS = "true";
     process.env.EVAL_MODELS = undefined;
-    process.env.DEFAULT_LLM_PROVIDER = "openai";
+    process.env.DEFAULT_LLMS = "openai:gpt-5.4-mini";
     process.env.OPENAI_API_KEY = "openai-key";
     process.env.LLM_API_KEY = undefined;
 

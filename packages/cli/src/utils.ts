@@ -72,12 +72,16 @@ export function generateEnvFile(config: {
     setValue("DIRECT_URL", wrapInQuotes(env.DIRECT_URL));
     setValue("UPSTASH_REDIS_URL", wrapInQuotes(env.UPSTASH_REDIS_URL));
     setValue("UPSTASH_REDIS_TOKEN", env.UPSTASH_REDIS_TOKEN);
+    setValue("REDIS_URL", wrapInQuotes(env.REDIS_URL));
+    setValue("QUEUE_BACKEND", env.QUEUE_BACKEND);
   } else {
     // External infra - set placeholders
     setValue("DATABASE_URL", wrapInQuotes(env.DATABASE_URL));
     setValue("DIRECT_URL", wrapInQuotes(env.DIRECT_URL));
     setValue("UPSTASH_REDIS_URL", wrapInQuotes(env.UPSTASH_REDIS_URL));
     setValue("UPSTASH_REDIS_TOKEN", env.UPSTASH_REDIS_TOKEN);
+    setValue("REDIS_URL", wrapInQuotes(env.REDIS_URL));
+    setValue("QUEUE_BACKEND", env.QUEUE_BACKEND);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -129,11 +133,11 @@ export function generateEnvFile(config: {
   // LLM Configuration
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Set the active LLM provider
-  setValue("DEFAULT_LLM_PROVIDER", env.DEFAULT_LLM_PROVIDER);
-  setValue("DEFAULT_LLM_MODEL", env.DEFAULT_LLM_MODEL);
-  setValue("ECONOMY_LLM_PROVIDER", env.ECONOMY_LLM_PROVIDER);
-  setValue("ECONOMY_LLM_MODEL", env.ECONOMY_LLM_MODEL);
+  setValue("DEFAULT_LLMS", env.DEFAULT_LLMS);
+  setValue("ECONOMY_LLMS", env.ECONOMY_LLMS);
+  setValue("CHAT_LLMS", env.CHAT_LLMS);
+  setValue("NANO_LLMS", env.NANO_LLMS);
+  setValue("DRAFT_LLMS", env.DRAFT_LLMS);
 
   // Shared fallback key for cloud LLM providers.
   const legacyProviderApiKeyMap: Record<string, string> = {

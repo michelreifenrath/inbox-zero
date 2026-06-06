@@ -508,7 +508,7 @@ async function runSetupQuick(options: { name?: string }) {
   const selectedLlmProvider = String(llmProvider);
 
   // Gather LLM credentials before generating config
-  const llmEnv: EnvConfig = { DEFAULT_LLM_PROVIDER: selectedLlmProvider };
+  const llmEnv: EnvConfig = {};
   await promptLlmCredentials(selectedLlmProvider, llmEnv);
 
   // Generate token early so we can show it in the instructions
@@ -596,6 +596,7 @@ async function runSetupQuick(options: { name?: string }) {
     DATABASE_URL: `postgresql://postgres:${dbPassword}@db:5432/inboxzero`,
     UPSTASH_REDIS_TOKEN: redisToken,
     UPSTASH_REDIS_URL: "http://serverless-redis-http:80",
+    QUEUE_BACKEND: "internal",
     INTERNAL_API_URL: "http://web:3000",
     // Secrets
     AUTH_SECRET: generateSecret(32),
@@ -1081,7 +1082,6 @@ Full guide: https://docs.getinboxzero.com/self-hosting/microsoft-oauth`,
   if (p.isCancel(llmProvider)) cancelSetup();
   const selectedLlmProvider = String(llmProvider);
 
-  env.DEFAULT_LLM_PROVIDER = selectedLlmProvider;
   await promptLlmCredentials(selectedLlmProvider, env);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1109,6 +1109,7 @@ Full guide: https://docs.getinboxzero.com/self-hosting/microsoft-oauth`,
     env.REDIS_HTTP_PORT = redisHttpPort;
     env.WEB_PORT = webPort;
     env.UPSTASH_REDIS_TOKEN = redisToken;
+    env.QUEUE_BACKEND = "internal";
 
     if (runWebInDocker) {
       // Web app runs in Docker: use container hostnames
@@ -1571,8 +1572,11 @@ const CONFIG_CATEGORIES: Record<
   "AI Provider": {
     description: "LLM provider and API keys",
     keys: [
-      "DEFAULT_LLM_PROVIDER",
-      "DEFAULT_LLM_MODEL",
+      "DEFAULT_LLMS",
+      "ECONOMY_LLMS",
+      "CHAT_LLMS",
+      "NANO_LLMS",
+      "DRAFT_LLMS",
       "LLM_API_KEY",
       "BEDROCK_ACCESS_KEY",
       "BEDROCK_SECRET_KEY",
