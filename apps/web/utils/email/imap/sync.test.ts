@@ -69,6 +69,41 @@ describe("syncImapMailbox", () => {
     });
   });
 
+  it("stores an initial cursor even when the mailbox has no messages", async () => {
+    const client = new MockImapClient({ uidValidity: 7, uids: [] });
+    const processMessage = vi.fn();
+    const saveCursor = vi.fn();
+
+    const result = await syncImapMailbox({
+      emailAccountId: "email-account-id",
+      mailbox: "INBOX",
+      cursor: null,
+      client,
+      processMessage,
+      saveCursor,
+      logger: mockLogger(),
+    });
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(saveCursor).toHaveBeenCalledWith({
+      mailboxes: {
+        INBOX: {
+          uidValidity: "7",
+          lastUid: 0,
+          syncedAt: expect.any(String),
+        },
+      },
+    });
+    expect(result).toEqual({
+      emailAccountId: "email-account-id",
+      mailbox: "INBOX",
+      processed: 0,
+      lastUid: 0,
+      uidValidity: "7",
+      uidValidityChanged: false,
+    });
+  });
+
   it("processes only UIDs newer than the stored cursor on incremental sync", async () => {
     const client = new MockImapClient({ uidValidity: 7, uids: [1, 2, 3, 4] });
     const processMessage = vi.fn();
@@ -357,7 +392,7 @@ describe("pollImapEmailAccounts", () => {
 
     expect(logger.error).toHaveBeenCalledWith("Error polling IMAP account", {
       emailAccountId: "email-account-id",
-      error: expect.any(Error),
+      errorDetails: "auth failed",
     });
     expect(results).toEqual([
       {

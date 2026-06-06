@@ -278,12 +278,16 @@ export async function pollImapEmailAccounts({
       const result = await syncAccount({ emailAccountId, logger });
       results.push({ status: "success", ...result });
     } catch (error) {
-      logger.error("Error polling IMAP account", { emailAccountId, error });
+      const errorDetails = formatPollErrorDetails(error);
+      logger.error("Error polling IMAP account", {
+        emailAccountId,
+        errorDetails,
+      });
       results.push({
         emailAccountId,
         status: "error",
         message: "Failed to poll IMAP account.",
-        errorDetails: error instanceof Error ? error.message : String(error),
+        errorDetails,
       });
     }
   }
@@ -293,6 +297,10 @@ export async function pollImapEmailAccounts({
 
 function createDefaultClient(options: ImapFlowOptions): ImapMailboxSyncClient {
   return new ImapFlow(options) as unknown as ImapMailboxSyncClient;
+}
+
+function formatPollErrorDetails(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function getImapEmailAccountForSync(emailAccountId: string) {

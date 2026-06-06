@@ -14,6 +14,7 @@ import {
   verifyMailboxConnection,
 } from "@/utils/email/imap/connection";
 import { STRATO_IMAP_PRESET } from "@/utils/email/imap-presets";
+import { pollImapEmailAccounts } from "@/utils/email/imap/sync";
 import { IMAP_PROVIDER } from "@/utils/email/provider-types";
 import type { Logger } from "@/utils/logger";
 import prisma from "@/utils/prisma";
@@ -131,10 +132,17 @@ async function connectMailbox({
       update: getEmailConnectionData(input, connectionSettings),
     });
 
+    const initialSync = await pollConnectedImapMailbox({
+      emailAccountId: existingEmailAccount.id,
+      logger,
+      input,
+    });
+
     return {
       status: "updated" as const,
       emailAccountId: existingEmailAccount.id,
       email,
+      ...initialSync,
     };
   }
 
@@ -164,11 +172,81 @@ async function connectMailbox({
     },
   });
 
+  const initialSync = await pollConnectedImapMailbox({
+    emailAccountId: emailAccount.id,
+    logger,
+    input,
+  });
+
   return {
     status: "created" as const,
     emailAccountId: emailAccount.id,
     email: emailAccount.email,
+    ...initialSync,
   };
+}
+
+async function pollConnectedImapMailbox({
+  emailAccountId,
+  logger,
+  input,
+}: {
+  emailAccountId: string;
+  logger: Logger;
+  input: ConnectImapMailboxBody;
+}) {
+  const [result] = await pollImapEmailAccounts({
+    emailAccountIds: [emailAccountId],
+    logger,
+  });
+
+  if (!result) {
+    logger.warn("Initial IMAP poll returned no result", { emailAccountId });
+    return {
+      initialSyncStatus: "error" as const,
+      initialSyncError: "Failed to poll IMAP account.",
+    };
+  }
+
+  if (result.status === "success") {
+    return {
+      initialSyncStatus: "success" as const,
+      initialSyncMessagesProcessed: result.processed,
+    };
+  }
+
+  const errorDetails = sanitizeInitialSyncErrorDetails(
+    result.errorDetails,
+    input,
+  );
+
+  logger.warn("Initial IMAP poll failed after mailbox connection", {
+    emailAccountId,
+    message: result.message,
+    errorDetails,
+  });
+
+  return {
+    initialSyncStatus: "error" as const,
+    initialSyncError: result.message,
+    ...(errorDetails ? { initialSyncErrorDetails: errorDetails } : {}),
+  };
+}
+
+function sanitizeInitialSyncErrorDetails(
+  errorDetails: string | undefined,
+  input: ConnectImapMailboxBody,
+) {
+  if (!errorDetails) return;
+
+  let sanitizedErrorDetails = errorDetails;
+  if (input.password) {
+    sanitizedErrorDetails = sanitizedErrorDetails
+      .split(input.password)
+      .join("[redacted]");
+  }
+
+  return sanitizedErrorDetails;
 }
 
 async function assertCustomHostAllowed(host: string) {
