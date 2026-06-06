@@ -644,6 +644,161 @@ describe("ImapProvider", () => {
     ).toEqual([1, 2]);
   });
 
+  it("bulk archives selected senders across selectable folders and skips the archive folder", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Newsletters", name: "Newsletters", delimiter: "/" },
+        {
+          path: "Archive Mail",
+          name: "Archive Mail",
+          delimiter: "/",
+          specialUse: "\\Archive",
+        },
+        {
+          path: "Labels",
+          name: "Labels",
+          delimiter: "/",
+          flags: new Set(["\\Noselect"]),
+        },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "newsletter-1@example.com",
+            "Newsletter",
+            "2030-01-01T09:00:00.000Z",
+            { from: "newsletter@example.com" },
+          ),
+          buildStoredMessage(
+            2,
+            "other@example.com",
+            "Other",
+            "2030-01-01T10:00:00.000Z",
+            { from: "other@example.com" },
+          ),
+        ],
+        Newsletters: [
+          buildStoredMessage(
+            3,
+            "updates@example.com",
+            "Updates",
+            "2030-01-01T11:00:00.000Z",
+            { from: "updates@example.com" },
+          ),
+        ],
+        "Archive Mail": [
+          buildStoredMessage(
+            4,
+            "already-archived@example.com",
+            "Already archived",
+            "2030-01-01T12:00:00.000Z",
+            { from: "newsletter@example.com" },
+          ),
+        ],
+        Labels: [
+          buildStoredMessage(
+            5,
+            "label@example.com",
+            "Skipped",
+            "2030-01-01T13:00:00.000Z",
+            { from: "newsletter@example.com" },
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await provider.bulkArchiveFromSenders(
+      ["newsletter@example.com", "updates@example.com"],
+      "user@example.com",
+      "account-1",
+    );
+
+    expect(client.messages.INBOX?.map((message) => message.uid)).toEqual([2]);
+    expect(client.messages.Newsletters).toEqual([]);
+    expect(
+      client.messages["Archive Mail"]?.map((message) => message.uid),
+    ).toEqual([4, 1, 3]);
+    expect(client.openedMailboxes).not.toContain("Labels");
+    expect(client.openedMailboxOptions).not.toContainEqual({
+      path: "Archive Mail",
+      readOnly: true,
+    });
+  });
+
+  it("bulk trashes selected senders and skips the trash folder", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Archive", name: "Archive", delimiter: "/" },
+        { path: "Deleted Items", name: "Deleted Items", delimiter: "/" },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "newsletter@example.com",
+            "Newsletter",
+            "2030-01-01T09:00:00.000Z",
+            { from: "newsletter@example.com" },
+          ),
+        ],
+        Archive: [
+          buildStoredMessage(
+            2,
+            "archived-newsletter@example.com",
+            "Archived newsletter",
+            "2030-01-01T10:00:00.000Z",
+            { from: "newsletter@example.com" },
+          ),
+        ],
+        "Deleted Items": [
+          buildStoredMessage(
+            3,
+            "trashed-newsletter@example.com",
+            "Already trashed",
+            "2030-01-01T11:00:00.000Z",
+            { from: "newsletter@example.com" },
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await provider.bulkTrashFromSenders(
+      ["newsletter@example.com"],
+      "user@example.com",
+      "account-1",
+    );
+
+    expect(client.messages.INBOX).toEqual([]);
+    expect(client.messages.Archive).toEqual([]);
+    expect(
+      client.messages["Deleted Items"]?.map((message) => message.uid),
+    ).toEqual([3, 1, 2]);
+    expect(client.openedMailboxOptions).not.toContainEqual({
+      path: "Deleted Items",
+      readOnly: true,
+    });
+  });
+
+  it("does not connect for empty IMAP bulk sender cleanup", async () => {
+    const client = new MockImapClient();
+    const createClient = vi.fn(() => client);
+    const provider = new ImapProvider(settings, undefined, { createClient });
+
+    await provider.bulkArchiveFromSenders([], "user@example.com", "account-1");
+    await provider.bulkTrashFromSenders([""], "user@example.com", "account-1");
+
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
   it("updates read and starred flags with writable mailbox access", async () => {
     const client = new MockImapClient({
       messages: {
@@ -1089,14 +1244,14 @@ function buildStoredMessage(
   messageId: string,
   subject: string,
   date: string,
-  headers: { references?: string; inReplyTo?: string } = {},
+  headers: { from?: string; references?: string; inReplyTo?: string } = {},
   flags = new Set(["\\Seen"]),
 ): StoredMessage {
   return {
     uid,
     internalDate: new Date(date),
     flags,
-    source: Buffer.from(`From: Sender <sender@example.com>
+    source: Buffer.from(`From: Sender <${headers.from || "sender@example.com"}>
 To: Recipient <recipient@example.com>
 Subject: ${subject}
 Message-ID: <${messageId}>

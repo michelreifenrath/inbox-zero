@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMockEmailAccountWithAccount } from "@/__tests__/helpers";
 import prisma from "@/utils/__mocks__/prisma";
-import { bulkArchiveAction } from "@/utils/actions/mail-bulk-action";
+import {
+  bulkArchiveAction,
+  bulkTrashAction,
+} from "@/utils/actions/mail-bulk-action";
 
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/auth", () => ({
@@ -10,14 +13,19 @@ vi.mock("@/utils/auth", () => ({
   })),
 }));
 
-const { envMock, mockBulkArchiveFromSenders, mockCreateEmailProvider } =
-  vi.hoisted(() => ({
-    envMock: {
-      NODE_ENV: "test",
-    },
-    mockBulkArchiveFromSenders: vi.fn(),
-    mockCreateEmailProvider: vi.fn(),
-  }));
+const {
+  envMock,
+  mockBulkArchiveFromSenders,
+  mockBulkTrashFromSenders,
+  mockCreateEmailProvider,
+} = vi.hoisted(() => ({
+  envMock: {
+    NODE_ENV: "test",
+  },
+  mockBulkArchiveFromSenders: vi.fn(),
+  mockBulkTrashFromSenders: vi.fn(),
+  mockCreateEmailProvider: vi.fn(),
+}));
 
 vi.mock("@/env", () => ({
   env: envMock,
@@ -40,6 +48,7 @@ describe("bulkArchiveAction", () => {
     );
     mockCreateEmailProvider.mockResolvedValue({
       bulkArchiveFromSenders: mockBulkArchiveFromSenders,
+      bulkTrashFromSenders: mockBulkTrashFromSenders,
     });
   });
 
@@ -89,7 +98,7 @@ describe("bulkArchiveAction", () => {
     );
   });
 
-  it("rejects IMAP accounts before creating a provider", async () => {
+  it("archives IMAP senders directly with the provider", async () => {
     prisma.emailAccount.findUnique.mockResolvedValue(
       getMockEmailAccountWithAccount({
         email: "owner@example.com",
@@ -102,8 +111,44 @@ describe("bulkArchiveAction", () => {
       froms: ["sender@example.com"],
     });
 
-    expect(result?.serverError).toContain("isn't supported for IMAP accounts");
-    expect(mockCreateEmailProvider).not.toHaveBeenCalled();
-    expect(mockBulkArchiveFromSenders).not.toHaveBeenCalled();
+    expect(result?.serverError).toBeUndefined();
+    expect(result?.data).toBeUndefined();
+    expect(mockCreateEmailProvider).toHaveBeenCalledWith({
+      emailAccountId: "account-1",
+      provider: "imap",
+      logger: expect.anything(),
+    });
+    expect(mockBulkArchiveFromSenders).toHaveBeenCalledWith(
+      ["sender@example.com"],
+      "owner@example.com",
+      "account-1",
+    );
+  });
+
+  it("trashes IMAP senders directly with the provider", async () => {
+    prisma.emailAccount.findUnique.mockResolvedValue(
+      getMockEmailAccountWithAccount({
+        email: "owner@example.com",
+        userId: "user-1",
+        provider: "imap",
+      }),
+    );
+
+    const result = await bulkTrashAction("account-1", {
+      froms: ["sender@example.com"],
+    });
+
+    expect(result?.serverError).toBeUndefined();
+    expect(result?.data).toBeUndefined();
+    expect(mockCreateEmailProvider).toHaveBeenCalledWith({
+      emailAccountId: "account-1",
+      provider: "imap",
+      logger: expect.anything(),
+    });
+    expect(mockBulkTrashFromSenders).toHaveBeenCalledWith(
+      ["sender@example.com"],
+      "owner@example.com",
+      "account-1",
+    );
   });
 });
