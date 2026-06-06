@@ -424,6 +424,182 @@ describe("ImapProvider", () => {
     expect(client.openedMailboxes).not.toContain("Labels");
   });
 
+  it("archives a single message to the common-name archive folder", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Archiv", name: "Archiv", delimiter: "/" },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await provider.archiveMessage("INBOX:1");
+
+    expect(client.messages.INBOX).toEqual([]);
+    expect(client.messages.Archiv?.map((message) => message.uid)).toEqual([1]);
+    expect(client.openedMailboxOptions).toContainEqual({
+      path: "INBOX",
+      readOnly: false,
+    });
+  });
+
+  it("archives every thread message to the special-use archive folder and ignores label arguments", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Sent", name: "Sent", delimiter: "/", specialUse: "\\Sent" },
+        {
+          path: "Archive Mail",
+          name: "Archive Mail",
+          delimiter: "/",
+          specialUse: "\\Archive",
+        },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+        Sent: [
+          buildStoredMessage(
+            2,
+            "reply@example.com",
+            "Re: Root",
+            "2030-01-01T10:00:00.000Z",
+            {
+              references: "<root@example.com>",
+              inReplyTo: "<root@example.com>",
+            },
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await provider.archiveThreadWithLabel(
+      "root@example.com",
+      "user@example.com",
+      "ignored-label",
+    );
+
+    expect(client.messages.INBOX).toEqual([]);
+    expect(client.messages.Sent).toEqual([]);
+    expect(
+      client.messages["Archive Mail"]?.map((message) => message.uid),
+    ).toEqual([1, 2]);
+  });
+
+  it("trashes every thread message to the common-name trash folder", async () => {
+    const client = new MockImapClient({
+      folders: [
+        { path: "INBOX", name: "INBOX", delimiter: "/" },
+        { path: "Sent", name: "Sent", delimiter: "/", specialUse: "\\Sent" },
+        { path: "Deleted Items", name: "Deleted Items", delimiter: "/" },
+      ],
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+          ),
+        ],
+        Sent: [
+          buildStoredMessage(
+            2,
+            "reply@example.com",
+            "Re: Root",
+            "2030-01-01T10:00:00.000Z",
+            {
+              references: "<root@example.com>",
+              inReplyTo: "<root@example.com>",
+            },
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await provider.trashThread("root@example.com", "user@example.com", "user");
+
+    expect(client.messages.INBOX).toEqual([]);
+    expect(client.messages.Sent).toEqual([]);
+    expect(
+      client.messages["Deleted Items"]?.map((message) => message.uid),
+    ).toEqual([1, 2]);
+  });
+
+  it("updates read and starred flags with writable mailbox access", async () => {
+    const client = new MockImapClient({
+      messages: {
+        INBOX: [
+          buildStoredMessage(
+            1,
+            "root@example.com",
+            "Root",
+            "2030-01-01T09:00:00.000Z",
+            {},
+            new Set(),
+          ),
+          buildStoredMessage(
+            2,
+            "reply@example.com",
+            "Re: Root",
+            "2030-01-01T10:00:00.000Z",
+            {
+              references: "<root@example.com>",
+              inReplyTo: "<root@example.com>",
+            },
+            new Set(),
+          ),
+        ],
+      },
+    });
+    const provider = new ImapProvider(settings, undefined, {
+      createClient: () => client,
+    });
+
+    await provider.markRead("root@example.com");
+
+    expect(
+      client.messages.INBOX?.map((message) => message.flags?.has("\\Seen")),
+    ).toEqual([true, true]);
+
+    await provider.markReadThread("root@example.com", false);
+    await provider.starMessage("INBOX:1");
+
+    expect(
+      client.messages.INBOX?.map((message) => message.flags?.has("\\Seen")),
+    ).toEqual([false, false]);
+    expect(client.messages.INBOX?.[0]?.flags?.has("\\Flagged")).toBe(true);
+    expect(client.messages.INBOX?.[1]?.flags?.has("\\Flagged")).toBe(false);
+    expect(client.openedMailboxOptions).toContainEqual({
+      path: "INBOX",
+      readOnly: false,
+    });
+  });
+
   it("throws explicit errors for unsupported provider-stored draft operations", async () => {
     const provider = new ImapProvider(settings, undefined, {
       createClient: () => new MockImapClient(),
@@ -452,6 +628,7 @@ class MockImapClient implements ImapProviderClient {
   close = vi.fn();
   logout = vi.fn(async () => undefined);
   openedMailboxes: string[] = [];
+  openedMailboxOptions: Array<{ path: string; readOnly?: boolean }> = [];
   private currentMailbox = "INBOX";
   private readonly folders: Array<{
     path: string;
@@ -462,7 +639,7 @@ class MockImapClient implements ImapProviderClient {
     flags?: Set<string>;
     status?: { messages?: number; unseen?: number };
   }>;
-  private readonly messages: Record<string, StoredMessage[]>;
+  readonly messages: Record<string, StoredMessage[]>;
 
   constructor(
     options: {
@@ -490,7 +667,7 @@ class MockImapClient implements ImapProviderClient {
     };
   }
 
-  async mailboxOpen(path: string) {
+  async mailboxOpen(path: string, options?: { readOnly?: boolean }) {
     const folder = this.folders.find((item) => item.path === path);
     if (
       Array.from(folder?.flags || []).some((flag) =>
@@ -500,6 +677,7 @@ class MockImapClient implements ImapProviderClient {
       throw new Error(`Cannot open non-selectable mailbox: ${path}`);
     }
     this.openedMailboxes.push(path);
+    this.openedMailboxOptions.push({ path, readOnly: options?.readOnly });
     this.currentMailbox = path;
   }
 
@@ -551,6 +729,49 @@ class MockImapClient implements ImapProviderClient {
       size: message.source.length,
     };
   }
+
+  async messageMove(range: number[], destination: string) {
+    const sourceMessages = this.messages[this.currentMailbox] || [];
+    const uidSet = new Set(range);
+    const movingMessages = sourceMessages.filter((message) =>
+      uidSet.has(message.uid),
+    );
+
+    this.messages[this.currentMailbox] = sourceMessages.filter(
+      (message) => !uidSet.has(message.uid),
+    );
+    this.messages[destination] = [
+      ...(this.messages[destination] || []),
+      ...movingMessages,
+    ];
+
+    return true;
+  }
+
+  async messageFlagsAdd(range: number[], flags: string[]) {
+    this.updateFlags(range, flags, true);
+    return true;
+  }
+
+  async messageFlagsRemove(range: number[], flags: string[]) {
+    this.updateFlags(range, flags, false);
+    return true;
+  }
+
+  private updateFlags(range: number[], flags: string[], enabled: boolean) {
+    const uidSet = new Set(range);
+    for (const message of this.messages[this.currentMailbox] || []) {
+      if (!uidSet.has(message.uid)) continue;
+      message.flags ||= new Set();
+      for (const flag of flags) {
+        if (enabled) {
+          message.flags.add(flag);
+        } else {
+          message.flags.delete(flag);
+        }
+      }
+    }
+  }
 }
 
 function buildStoredMessage(
@@ -559,11 +780,12 @@ function buildStoredMessage(
   subject: string,
   date: string,
   headers: { references?: string; inReplyTo?: string } = {},
+  flags = new Set(["\\Seen"]),
 ): StoredMessage {
   return {
     uid,
     internalDate: new Date(date),
-    flags: new Set(["\\Seen"]),
+    flags,
     source: Buffer.from(`From: Sender <sender@example.com>
 To: Recipient <recipient@example.com>
 Subject: ${subject}

@@ -36,11 +36,11 @@ const PROVIDER_CAPABILITIES = {
     providerSignatureLookup: true,
   },
   [IMAP_PROVIDER]: {
-    mailboxArchive: false,
-    mailboxTrash: false,
-    mailboxMarkRead: false,
+    mailboxArchive: true,
+    mailboxTrash: true,
+    mailboxMarkRead: true,
     mailboxMarkUnread: false,
-    mailboxStar: false,
+    mailboxStar: true,
     mailboxSpam: false,
     folderMove: false,
     folderCreate: false,
@@ -86,7 +86,7 @@ const RULE_ACTION_REQUIRED_CAPABILITIES: Partial<
 };
 
 export const IMAP_UNSUPPORTED_WRITE_FEATURE_MESSAGE =
-  "This feature isn't supported for IMAP accounts because generic IMAP mailboxes are read-only in Inbox Zero.";
+  "This feature isn't supported for IMAP accounts because generic IMAP mailboxes only support limited write actions in Inbox Zero.";
 
 export const IMAP_UNSUPPORTED_DRAFT_FEATURE_MESSAGE =
   "This feature isn't supported for IMAP accounts because provider-stored drafts aren't available for generic IMAP mailboxes.";

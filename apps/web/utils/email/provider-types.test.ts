@@ -47,7 +47,7 @@ describe("email provider identity helpers", () => {
     expect(isOAuthProvider(undefined)).toBe(false);
   });
 
-  it("keeps provider-stored and provider-write capabilities off for IMAP", () => {
+  it("keeps provider-stored and full provider-write capabilities off for IMAP", () => {
     for (const provider of ["google", "microsoft"]) {
       expect(supportsProviderStoredDrafts(provider)).toBe(true);
       expect(supportsProviderSignatureLookup(provider)).toBe(true);
@@ -93,11 +93,11 @@ describe("email provider identity helpers", () => {
       providerSignatureLookup: true,
     });
     expect(getProviderCapabilities("imap")).toMatchObject({
-      mailboxArchive: false,
-      mailboxTrash: false,
-      mailboxMarkRead: false,
+      mailboxArchive: true,
+      mailboxTrash: true,
+      mailboxMarkRead: true,
       mailboxMarkUnread: false,
-      mailboxStar: false,
+      mailboxStar: true,
       mailboxSpam: false,
       folderMove: false,
       folderCreate: false,
@@ -117,6 +117,9 @@ describe("email provider identity helpers", () => {
     expect(
       supportsProviderRuleAction("microsoft", ActionType.MOVE_FOLDER),
     ).toBe(true);
+    expect(supportsProviderRuleAction("imap", ActionType.ARCHIVE)).toBe(true);
+    expect(supportsProviderRuleAction("imap", ActionType.MARK_READ)).toBe(true);
+    expect(supportsProviderRuleAction("imap", ActionType.STAR)).toBe(true);
     expect(supportsProviderRuleAction("imap", ActionType.LABEL)).toBe(false);
     expect(supportsProviderRuleAction("google", ActionType.DRAFT_EMAIL)).toBe(
       true,
@@ -132,6 +135,12 @@ describe("email provider identity helpers", () => {
     ).toBe(false);
     expect(supportsProviderRuleAction("imap", ActionType.SEND_EMAIL)).toBe(
       true,
+    );
+    expect(supportsProviderRuleAction("imap", ActionType.MARK_SPAM)).toBe(
+      false,
+    );
+    expect(supportsProviderRuleAction("imap", ActionType.MOVE_FOLDER)).toBe(
+      false,
     );
     expect(supportsProviderCapability("imap", "providerNativeFilters")).toBe(
       false,

@@ -12,7 +12,7 @@ import { onTrashThread } from "@/utils/actions/client";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import {
   isGoogleProvider,
-  supportsProviderWriteActions,
+  supportsProviderCapability,
 } from "@/utils/email/provider-types";
 
 export function ActionButtons({
@@ -31,7 +31,8 @@ export function ActionButtons({
   refetch: (threadId?: string) => void;
 }) {
   const { emailAccountId, userEmail, provider } = useAccount();
-  const canWriteProviderMailbox = supportsProviderWriteActions(provider);
+  const canArchive = supportsProviderCapability(provider, "mailboxArchive");
+  const canTrash = supportsProviderCapability(provider, "mailboxTrash");
 
   const openInGmail = useCallback(() => {
     // open in gmail
@@ -70,14 +71,17 @@ export function ActionButtons({
           <SparklesIcon className="size-4" aria-hidden="true" />
         ),
       },
-      ...(canWriteProviderMailbox
+      ...(canArchive
         ? [
             {
               tooltip: "Archive",
               onClick: onArchive,
               icon: <ArchiveIcon className="size-4" aria-hidden="true" />,
             },
-            // may remove later
+          ]
+        : []),
+      ...(canTrash
+        ? [
             {
               tooltip: "Delete",
               onClick: onTrash,
@@ -98,7 +102,8 @@ export function ActionButtons({
       isPlanning,
       openInGmail,
       provider,
-      canWriteProviderMailbox,
+      canArchive,
+      canTrash,
     ],
   );
 
