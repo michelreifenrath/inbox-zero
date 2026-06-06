@@ -47,6 +47,7 @@ export function ModelSection() {
             aiProvider={data.aiProvider}
             aiModel={data.aiModel}
             hasAiApiKey={data.hasAiApiKey}
+            needsAiConfiguration={data.aiReadiness.needsAiConfiguration}
             models={dataModels}
             refetchUser={mutate}
             emailAccountId={emailAccountId}
@@ -61,6 +62,7 @@ function ModelSectionForm(props: {
   aiProvider: SaveAiSettingsBody["aiProvider"] | null;
   aiModel: SaveAiSettingsBody["aiModel"] | null;
   hasAiApiKey: boolean;
+  needsAiConfiguration: boolean;
   models?: OpenAiModelsResponse;
   refetchUser: () => void;
   emailAccountId: string;
@@ -167,6 +169,14 @@ function ModelSectionForm(props: {
 
       {globalError?.message && (
         <AlertError title="Error saving" description={globalError.message} />
+      )}
+
+      {props.needsAiConfiguration && (
+        <AlertBasic
+          title="AI access is not configured"
+          description="Mailbox connections can stay healthy, but AI automation remains inactive until you choose a provider and save an API key."
+          variant="blue"
+        />
       )}
 
       {aiProvider === Provider.OPEN_AI &&

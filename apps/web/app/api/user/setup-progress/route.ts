@@ -3,6 +3,8 @@ import prisma from "@/utils/prisma";
 import { SafeError } from "@/utils/error";
 import { withEmailAccount } from "@/utils/middleware";
 import { env } from "@/env";
+import { getAiReadiness } from "@/utils/premium";
+import { getResolvedDeploymentRolePrimaryModelEntry } from "@/utils/llms/model";
 
 export type GetSetupProgressResponse = Awaited<
   ReturnType<typeof getSetupProgress>
@@ -39,7 +41,9 @@ async function getSetupProgress({
         take: 1,
       },
       calendarConnections: { select: { id: true }, take: 1 },
-      user: { select: { dismissedHints: true } },
+      user: {
+        select: { aiApiKey: true, aiProvider: true, dismissedHints: true },
+      },
       members: {
         take: 1,
         select: {
@@ -89,6 +93,13 @@ async function getSetupProgress({
     env.NEXT_PUBLIC_MEETING_BRIEFS_ENABLED ||
       env.NEXT_PUBLIC_BOOKING_LINKS_ENABLED,
   );
+  const deploymentAiModel =
+    getResolvedDeploymentRolePrimaryModelEntry("default");
+  const aiReadiness = getAiReadiness({
+    aiProvider: emailAccount.user.aiProvider,
+    hasAiApiKey: !!emailAccount.user.aiApiKey,
+    hasDeploymentAiConfiguration: !!deploymentAiModel,
+  });
 
   const teamInviteCompleted =
     hasTeamMembers || hasPendingInvitations || teamInviteDismissed;
@@ -124,6 +135,7 @@ async function getSetupProgress({
     total,
     isComplete: completed === total,
     showCalendarStep,
+    aiReadiness,
     tabsExtensionCompleted,
     teamInvite: showTeamInviteStep
       ? {

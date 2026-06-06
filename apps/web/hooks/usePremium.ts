@@ -3,6 +3,7 @@
 import { env } from "@/env";
 import { useUser } from "@/hooks/useUser";
 import {
+  getAiReadiness,
   getUserTier,
   hasAiAccess,
   hasUnsubscribeAccess,
@@ -15,6 +16,12 @@ export function usePremium() {
 
   const premium = data?.premium;
   const hasAiApiKey = data?.hasAiApiKey;
+  const aiReadiness = getAiReadiness({
+    aiProvider: data?.aiProvider,
+    hasAiApiKey,
+    hasDeploymentAiConfiguration:
+      data?.aiReadiness?.hasDeploymentAiConfiguration,
+  });
 
   if (env.NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS) {
     return {
@@ -23,6 +30,9 @@ export function usePremium() {
       isPremium: true,
       hasUnsubscribeAccess: true,
       hasAiAccess: true,
+      aiReadiness,
+      hasAiConfiguration: aiReadiness.hasAiConfiguration,
+      needsAiConfiguration: aiReadiness.needsAiConfiguration,
       isProPlanWithoutApiKey: false,
       tier: "PROFESSIONAL_ANNUALLY" as const,
     };
@@ -42,6 +52,9 @@ export function usePremium() {
       isUserPremium ||
       hasUnsubscribeAccess(tier || null, premium?.unsubscribeCredits),
     hasAiAccess: isUserPremium && hasAiAccess(tier || null, hasAiApiKey),
+    aiReadiness,
+    hasAiConfiguration: aiReadiness.hasAiConfiguration,
+    needsAiConfiguration: aiReadiness.needsAiConfiguration,
     isProPlanWithoutApiKey,
     tier,
   };

@@ -22,6 +22,7 @@ import {
   PageHeading,
   SectionDescription,
 } from "@/components/Typography";
+import { AlertBasic } from "@/components/Alert";
 import { Card } from "@/components/ui/card";
 import { prefixPath } from "@/utils/path";
 import { useSetupProgress } from "@/hooks/useSetupProgress";
@@ -269,6 +270,7 @@ function Checklist({
   totalSteps,
   isBulkUnsubscribeConfigured,
   isAiAssistantConfigured,
+  needsAiConfiguration,
   isCalendarConnected,
   showCalendarStep,
   isTabsExtensionCompleted,
@@ -281,6 +283,7 @@ function Checklist({
   totalSteps: number;
   isBulkUnsubscribeConfigured: boolean;
   isAiAssistantConfigured: boolean;
+  needsAiConfiguration: boolean;
   isCalendarConnected: boolean;
   showCalendarStep: boolean;
   isTabsExtensionCompleted: boolean;
@@ -351,6 +354,16 @@ function Checklist({
           </div>
         </div>
       </div>
+
+      {needsAiConfiguration && (
+        <div className="border-b border-border p-4">
+          <AlertBasic
+            title="AI access is not configured"
+            description="Your mailbox connection can work, but AI automation stays inactive until you configure an AI provider and API key in Settings."
+            variant="blue"
+          />
+        </div>
+      )}
 
       <StepItem
         href={getOnboardingStepHref(emailAccountId, STEP_KEYS.LABELS)}
@@ -463,6 +476,7 @@ export function SetupContent() {
           emailAccountId={emailAccountId}
           provider={provider}
           isAiAssistantConfigured={data.steps.aiAssistant}
+          needsAiConfiguration={data.aiReadiness.needsAiConfiguration}
           isBulkUnsubscribeConfigured={data.steps.bulkUnsubscribe}
           isCalendarConnected={data.steps.calendarConnected}
           showCalendarStep={data.showCalendarStep}
@@ -484,6 +498,7 @@ function SetupPageContent({
   provider,
   isBulkUnsubscribeConfigured,
   isAiAssistantConfigured,
+  needsAiConfiguration,
   isCalendarConnected,
   showCalendarStep,
   isTabsExtensionCompleted,
@@ -498,6 +513,7 @@ function SetupPageContent({
   provider: string;
   isBulkUnsubscribeConfigured: boolean;
   isAiAssistantConfigured: boolean;
+  needsAiConfiguration: boolean;
   isCalendarConnected: boolean;
   showCalendarStep: boolean;
   isTabsExtensionCompleted: boolean;
@@ -532,6 +548,7 @@ function SetupPageContent({
           provider={provider}
           isBulkUnsubscribeConfigured={isBulkUnsubscribeConfigured}
           isAiAssistantConfigured={isAiAssistantConfigured}
+          needsAiConfiguration={needsAiConfiguration}
           isCalendarConnected={isCalendarConnected}
           showCalendarStep={showCalendarStep}
           isTabsExtensionCompleted={isTabsExtensionCompleted}
