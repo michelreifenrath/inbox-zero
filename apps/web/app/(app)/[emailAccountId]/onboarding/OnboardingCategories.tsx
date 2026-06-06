@@ -42,9 +42,11 @@ import { cn } from "@/utils";
 import { TooltipExplanation } from "@/components/TooltipExplanation";
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
-  supportsProviderWriteActions,
+  supportsProviderRuleAction,
 } from "@/utils/email/provider-types";
+import { ActionType } from "@/generated/prisma/enums";
 import { MutedText } from "@/components/Typography";
 
 // copy paste of old file
@@ -69,7 +71,7 @@ export function CategoriesSetup({
     categoryConfig(provider).map((c) => ({
       name: c.key,
       description: "",
-      action: supportsProviderWriteActions(provider) ? c.action : undefined,
+      action: supportsCategoryAction(provider, c.action) ? c.action : undefined,
       key: c.key,
     })),
   );
@@ -216,7 +218,9 @@ function CategoryCard({
   useTooltip: boolean;
   provider: string;
 }) {
-  const supportsWriteActions = supportsProviderWriteActions(provider);
+  const supportsCategoryActions =
+    supportsProviderRuleAction(provider, ActionType.LABEL) ||
+    supportsProviderRuleAction(provider, ActionType.MOVE_FOLDER);
 
   return (
     <Card>
@@ -245,8 +249,8 @@ function CategoryCard({
 
         <div className="ml-auto flex max-w-[220px] shrink-0 flex-col items-end gap-1">
           <Select
-            disabled={!supportsWriteActions}
-            value={supportsWriteActions ? value || undefined : "none"}
+            disabled={!supportsCategoryActions}
+            value={supportsCategoryActions ? value || undefined : "none"}
             onValueChange={(value) => {
               update(index, {
                 action:
@@ -258,7 +262,7 @@ function CategoryCard({
               <SelectValue placeholder="Select action" />
             </SelectTrigger>
             <SelectContent>
-              {supportsWriteActions && isMicrosoftProvider(provider) && (
+              {supportsCategoryActions && isMicrosoftProvider(provider) && (
                 <>
                   <SelectItem value="label">Categorise</SelectItem>
                   <SelectItem value="move_folder">Move to folder</SelectItem>
@@ -267,7 +271,7 @@ function CategoryCard({
                   </SelectItem> */}
                 </>
               )}
-              {supportsWriteActions && isGoogleProvider(provider) && (
+              {supportsCategoryActions && isGoogleProvider(provider) && (
                 <>
                   <SelectItem value="label">Label</SelectItem>
                   <SelectItem value="label_archive">Label & archive</SelectItem>
@@ -276,13 +280,15 @@ function CategoryCard({
                   </SelectItem> */}
                 </>
               )}
+              {supportsCategoryActions && isImapProvider(provider) && (
+                <SelectItem value="move_folder">Move to folder</SelectItem>
+              )}
               <SelectItem value="none">Do nothing</SelectItem>
             </SelectContent>
           </Select>
-          {!supportsWriteActions && (
+          {!supportsCategoryActions && (
             <MutedText className="text-right text-xs">
-              IMAP accounts are read-only in Inbox Zero, so onboarding won't
-              create labels, folders, archives, or drafts.
+              This account doesn't support category actions in Inbox Zero.
             </MutedText>
           )}
         </div>
@@ -317,6 +323,20 @@ function SectionHeader({
   return (
     <div className={cn("text-sm font-medium mb-2", className)}>{children}</div>
   );
+}
+
+function supportsCategoryAction(provider: string, action: CategoryAction) {
+  if (action === "move_folder" || action === "move_folder_delayed") {
+    return supportsProviderRuleAction(provider, ActionType.MOVE_FOLDER);
+  }
+  if (
+    action === "label" ||
+    action === "label_archive" ||
+    action === "label_archive_delayed"
+  ) {
+    return supportsProviderRuleAction(provider, ActionType.LABEL);
+  }
+  return true;
 }
 
 function getRandomIcons() {

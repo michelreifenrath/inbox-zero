@@ -55,6 +55,7 @@ export type ImapProviderClient = {
   close(): void;
   logout?(): Promise<void>;
   list(options?: unknown): Promise<ImapMailbox[]>;
+  mailboxCreate?(path: string): Promise<unknown>;
   status?(
     path: string,
     query: {
@@ -663,8 +664,10 @@ export class ImapProvider implements EmailProvider {
   async getFiltersList(): Promise<EmailFilter[]> {
     this.unsupported("getFiltersList");
   }
-  async getOrCreateFolderIdByName(_folderName: string): Promise<string> {
-    this.unsupported("getOrCreateFolderIdByName");
+  async getOrCreateFolderIdByName(folderName: string): Promise<string> {
+    return this.withClient((client) =>
+      this.getOrCreateFolderIdByNameWithClient(client, folderName),
+    );
   }
   async getOrCreateInboxZeroLabel(_key: InboxZeroLabel): Promise<EmailLabel> {
     this.unsupported("getOrCreateInboxZeroLabel");
@@ -717,11 +720,22 @@ export class ImapProvider implements EmailProvider {
     this.unsupported("markSpam");
   }
   async moveThreadToFolder(
-    _threadId: string,
+    threadId: string,
     _ownerEmail: string,
-    _folderName: string,
+    folderName: string,
   ): Promise<void> {
-    this.unsupported("moveThreadToFolder");
+    await this.withClient(async (client) => {
+      const folderPath = await this.getOrCreateFolderIdByNameWithClient(
+        client,
+        folderName,
+      );
+      const messages = await this.getThreadMessagesWithClient(client, threadId);
+      await this.moveMessages(
+        client,
+        messages.map(({ id }) => parseImapMessageId(id)),
+        folderPath,
+      );
+    });
   }
   async removeThreadLabel(_threadId: string, _labelId: string): Promise<void> {
     this.unsupported("removeThreadLabel");
@@ -827,6 +841,25 @@ export class ImapProvider implements EmailProvider {
     return this.withClient((client) =>
       this.getMessagePageWithClient(client, options),
     );
+  }
+
+  private async getOrCreateFolderIdByNameWithClient(
+    client: ImapProviderClient,
+    folderName: string,
+  ) {
+    const folderPath = normalizeFolderPath(folderName);
+    const existingFolder = findFolderByPathOrName(
+      await client.list(),
+      folderPath,
+    );
+    if (existingFolder) return existingFolder.path;
+
+    if (!client.mailboxCreate) {
+      throw new Error("IMAP provider cannot create folders with this client.");
+    }
+
+    await client.mailboxCreate(folderPath);
+    return folderPath;
   }
 
   private async getMessagePageWithClient(
@@ -1231,6 +1264,15 @@ function isSelectableFolder(folder: ImapMailbox) {
   );
 }
 
+function findFolderByPathOrName(folders: ImapMailbox[], folderName: string) {
+  const normalizedFolderName = folderName.trim().toLowerCase();
+  return folders
+    .filter(isSelectableFolder)
+    .find((folder) =>
+      getMailboxNames(folder).some((name) => name === normalizedFolderName),
+    );
+}
+
 function findMailboxBySpecialUseOrName(
   folders: ImapMailbox[],
   specialUse: string,
@@ -1389,6 +1431,15 @@ function decodePageToken(pageToken: string): PageToken {
   } catch {
     throw new Error("Invalid IMAP page token.");
   }
+}
+
+function normalizeFolderPath(folderName: string) {
+  const folderPath = folderName.trim();
+  if (!folderPath) throw new Error("IMAP folder name is required.");
+  if (/\p{C}/u.test(folderPath)) {
+    throw new Error("IMAP folder name contains unsupported characters.");
+  }
+  return folderPath;
 }
 
 function getFolderDisplayName(path: string, delimiter = "/") {

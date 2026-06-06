@@ -68,13 +68,16 @@ describe("getAvailableActionsForRuleEditor", () => {
     expect(actions).not.toContain(ActionType.DRAFT_MESSAGING_CHANNEL);
   });
 
-  it("keeps folder-backed rule actions Microsoft-only", () => {
+  it("keeps folder-backed rule actions limited to folder-capable providers", () => {
     expect(
       getAvailableActionsForRuleEditor({ provider: "google" }),
     ).not.toContain(ActionType.MOVE_FOLDER);
     expect(
       getAvailableActionsForRuleEditor({ provider: "microsoft" }),
     ).toContain(ActionType.MOVE_FOLDER);
+    expect(getAvailableActionsForRuleEditor({ provider: "imap" })).toContain(
+      ActionType.MOVE_FOLDER,
+    );
   });
 
   it("exposes only implemented IMAP rule actions plus SMTP send actions", () => {
@@ -83,6 +86,7 @@ describe("getAvailableActionsForRuleEditor", () => {
     });
 
     expect(actions).toEqual([
+      ActionType.MOVE_FOLDER,
       ActionType.ARCHIVE,
       ActionType.MARK_READ,
       ActionType.STAR,

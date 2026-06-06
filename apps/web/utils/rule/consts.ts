@@ -1,5 +1,9 @@
 import { DEFAULT_COLD_EMAIL_PROMPT } from "@/utils/cold-email/prompt";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+  supportsProviderStoredDrafts,
+} from "@/utils/email/provider-types";
 import { ActionType, SystemType } from "@/generated/prisma/enums";
 import { env } from "@/env";
 
@@ -149,6 +153,10 @@ export function isEligibleForClassificationFeedback(
 
 export function getCategoryAction(systemType: SystemType, provider: string) {
   const config = getRuleConfig(systemType);
+
+  if (isImapProvider(provider)) {
+    return "move_folder";
+  }
 
   if (isMicrosoftProvider(provider)) {
     return config.categoryActionMicrosoft || config.categoryAction;
@@ -367,6 +375,6 @@ export function getSystemRuleActionTypes(
   return getActionTypesForCategoryAction({
     categoryAction,
     systemType,
-    draftReply: config.draftReply,
+    draftReply: config.draftReply && supportsProviderStoredDrafts(provider),
   });
 }
